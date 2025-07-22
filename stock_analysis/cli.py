@@ -699,12 +699,20 @@ def handle_export_command(args) -> int:
                 # Single result
                 result = _dict_to_analysis_result(data)
                 results.append(result)
-            elif 'data' in data and isinstance(data['data'], list):
+            elif 'data' in data:
                 # Power BI JSON format with data wrapper
-                for item in data['data']:
-                    if isinstance(item, dict) and 'symbol' in item:
-                        result = _dict_to_analysis_result(item)
-                        results.append(result)
+                if isinstance(data['data'], list):
+                    for item in data['data']:
+                        if isinstance(item, dict) and 'symbol' in item:
+                            result = _dict_to_analysis_result(item)
+                            results.append(result)
+                elif isinstance(data['data'], dict) and 'summary' in data['data']:
+                    # Handle nested structure with summary data
+                    for item in data['data']['summary']:
+                        if isinstance(item, dict) and 'Symbol' in item:
+                            # Create a simplified result from summary data
+                            result = _summary_to_analysis_result(item)
+                            results.append(result)
         
         if not results:
             print("Error: No valid analysis results found in input file", file=sys.stderr)
@@ -759,6 +767,86 @@ def handle_export_command(args) -> int:
             import traceback
             traceback.print_exc()
         return 1
+
+
+def _summary_to_analysis_result(data: dict) -> AnalysisResult:
+    """Convert summary data to AnalysisResult object.
+    
+    Args:
+        data: Dictionary containing summary data
+        
+    Returns:
+        AnalysisResult: Converted analysis result object
+    """
+    # Create a simplified result from summary data
+    stock_info = StockInfo(
+        symbol=data.get('Symbol', ''),
+        company_name=data.get('Company_Name', ''),
+        current_price=data.get('Current_Price', 0.0),
+        market_cap=data.get('Market_Cap', 0.0),
+        sector=data.get('Sector', ''),
+        industry=data.get('Industry', ''),
+        pe_ratio=0.0,
+        pb_ratio=0.0,
+        dividend_yield=0.0,
+        beta=0.0
+    )
+    
+    # Create minimal health score
+    health_score = HealthScore(
+        overall_score=data.get('Overall_Health_Score', 0.0),
+        financial_strength=0.0,
+        profitability_health=0.0,
+        liquidity_health=0.0,
+        risk_assessment=data.get('Risk_Assessment', 'Medium')
+    )
+    
+    # Create minimal fair value
+    fair_value = FairValueResult(
+        current_price=data.get('Current_Price', 0.0),
+        dcf_value=0.0,
+        peer_comparison_value=0.0,
+        average_fair_value=data.get('Average_Fair_Value', 0.0),
+        recommendation=data.get('Valuation_Recommendation', 'HOLD'),
+        confidence_level=0.0
+    )
+    
+    # Create minimal sentiment
+    sentiment = SentimentResult(
+        overall_sentiment=data.get('Overall_Sentiment', 0.0),
+        positive_count=0,
+        negative_count=0,
+        neutral_count=0,
+        key_themes=[],
+        sentiment_trend=[]
+    )
+    
+    # Create timestamp from data or use current time
+    timestamp = datetime.fromisoformat(data.get('Timestamp')) if data.get('Timestamp') else datetime.now()
+    
+    # Create minimal financial ratios
+    financial_ratios = FinancialRatios(
+        liquidity_ratios=LiquidityRatios(current_ratio=0.0, quick_ratio=0.0, cash_ratio=0.0),
+        profitability_ratios=ProfitabilityRatios(
+            gross_margin=0.0, operating_margin=0.0, net_profit_margin=0.0, 
+            return_on_assets=0.0, return_on_equity=0.0
+        ),
+        leverage_ratios=LeverageRatios(debt_to_equity=0.0, debt_to_assets=0.0, interest_coverage=0.0),
+        efficiency_ratios=EfficiencyRatios(
+            asset_turnover=0.0, inventory_turnover=0.0, receivables_turnover=0.0
+        )
+    )
+    
+    return AnalysisResult(
+        symbol=data.get('Symbol', ''),
+        timestamp=timestamp,
+        stock_info=stock_info,
+        financial_ratios=financial_ratios,
+        health_score=health_score,
+        fair_value=fair_value,
+        sentiment=sentiment,
+        recommendations=[]
+    )
 
 
 def _dict_to_analysis_result(data: dict) -> AnalysisResult:
