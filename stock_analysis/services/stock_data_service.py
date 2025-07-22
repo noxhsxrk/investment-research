@@ -7,11 +7,11 @@ using the yfinance library, with retry logic, rate limiting, and error handling.
 import time
 import random
 import logging
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Union, Any, Type
 import pandas as pd
 import yfinance as yf
 
-from stock_analysis.models.data_models import StockInfo
+from stock_analysis.models.data_models import SecurityInfo, StockInfo, ETFInfo
 from stock_analysis.utils.exceptions import DataRetrievalError, NetworkError, RateLimitError
 from stock_analysis.utils.config import config
 from stock_analysis.utils.logging import get_logger, log_api_call, log_data_quality_issue
@@ -32,6 +32,208 @@ class StockDataService:
         self.rate_limit_delay = config.get('stock_analysis.data_sources.yfinance.rate_limit_delay', 1.0)
         self.last_request_time = 0
     
+    def _is_etf(self, info: dict) -> bool:
+        """Determine if a security is an ETF based on its info.
+        
+        Args:
+            info: Security info dictionary from yfinance
+            
+        Returns:
+            bool: True if the security is an ETF, False otherwise
+        """
+        # Check various indicators that suggest this is an ETF
+        etf_indicators = [
+            info.get('quoteType', '').upper() == 'ETF',
+            info.get('fundFamily') is not None,
+            info.get('etf', False) is True,
+            'expense ratio' in str(info.get('longBusinessSummary', '')).lower(),
+            'fund' in str(info.get('longName', '')).lower()
+        ]
+        return any(etf_indicators)
+    
+    def _extract_etf_info(self, symbol: str, info: dict) -> ETFInfo:
+        """Extract ETF information from yfinance data.
+        
+        Args:
+            symbol: ETF symbol
+            info: Raw info dictionary from yfinance
+            
+        Returns:
+            ETFInfo object with ETF data
+        """
+        # Extract asset allocation if available
+        asset_allocation = {}
+        for key, value in info.items():
+            if key.endswith('Position') and isinstance(value, (int, float)):
+                asset_type = key.replace('Position', '').lower()
+                asset_allocation[asset_type] = value / 100  # Convert percentage to decimal
+        
+        # Extract holdings if available
+        holdings = []
+        if info.get('holdings'):
+            for holding in info['holdings']:
+                holdings.append({
+                    'symbol': holding.get('symbol', ''),
+                    'name': holding.get('holdingName', ''),
+                    'weight': holding.get('holdingPercent', 0.0) / 100  # Convert to decimal
+                })
+        
+        return ETFInfo(
+            symbol=symbol,
+            name=info.get('longName', info.get('shortName', symbol)),
+            current_price=info.get('regularMarketPrice', info.get('currentPrice', 0.0)),
+            market_cap=info.get('marketCap'),  # Can be None for ETFs
+            beta=info.get('beta'),
+            expense_ratio=info.get('annualReportExpenseRatio'),
+            assets_under_management=info.get('totalAssets'),
+            nav=info.get('navPrice'),
+            category=info.get('category'),
+            asset_allocation=asset_allocation if asset_allocation else None,
+            holdings=holdings if holdings else None,
+            dividend_yield=info.get('dividendYield')
+        )
+    
+    def _extract_stock_info(self, symbol: str, info: dict) -> StockInfo:
+        """Extract stock information from yfinance data.
+        
+        Args:
+            symbol: Stock symbol
+            info: Raw info dictionary from yfinance
+            
+        Returns:
+            StockInfo object with stock data
+        """
+        # Create StockInfo with required fields first
+        stock_info = StockInfo(
+            company_name=info.get('longName', info.get('shortName', symbol)),
+            symbol=symbol,
+            name=info.get('longName', info.get('shortName', symbol)),
+            current_price=info.get('regularMarketPrice', info.get('currentPrice', 0.0)),
+            market_cap=info.get('marketCap', 0.0),
+            beta=info.get('beta'),
+            pe_ratio=info.get('trailingPE'),
+            pb_ratio=info.get('priceToBook'),
+            dividend_yield=info.get('dividendYield'),
+            sector=info.get('sector'),
+            industry=info.get('industry')
+        )
+        
+        return stock_info
+    
+    @monitor_performance('get_security_info')
+    def get_security_info(self, symbol: str, use_cache: bool = True) -> SecurityInfo:
+        """Get security (stock or ETF) information.
+        
+        Args:
+            symbol: Security ticker symbol
+            use_cache: Whether to use cached data if available
+            
+        Returns:
+            SecurityInfo object (either StockInfo or ETFInfo) with security information
+            
+        Raises:
+            DataRetrievalError: If data cannot be retrieved
+        """
+        logger.set_context(symbol=symbol, operation='get_security_info')
+        logger.info(f"Retrieving security info for {symbol}")
+        
+        # Generate cache key
+        cache_key = f"security_info:{symbol}"
+        cache = get_cache_manager()
+        
+        # Try to get from cache first if caching is enabled
+        if use_cache:
+            cached_data = cache.get(cache_key)
+            if cached_data:
+                logger.info(f"Retrieved security info for {symbol} from cache")
+                return cached_data
+        
+        start_time = time.time()
+        
+        try:
+            # Apply rate limiting before making requests
+            self._rate_limit()
+            
+            # Get security information using yfinance
+            ticker = self._retry_with_backoff(yf.Ticker, symbol)
+            
+            self._rate_limit()
+            info = self._retry_with_backoff(lambda: ticker.info)
+            
+            # Log API call details
+            response_time = time.time() - start_time
+            log_api_call(
+                logger, 
+                'yfinance', 
+                f'/ticker/{symbol}/info',
+                {'symbol': symbol},
+                response_time,
+                200  # Assume success if no exception
+            )
+            
+            # Determine if this is an ETF and create appropriate object
+            is_etf = self._is_etf(info)
+            security_info = (
+                self._extract_etf_info(symbol, info) if is_etf 
+                else self._extract_stock_info(symbol, info)
+            )
+            
+            # Check for data quality issues
+            missing_fields = []
+            invalid_values = {}
+            
+            if not security_info.name:
+                missing_fields.append('name')
+            
+            if security_info.current_price <= 0:
+                invalid_values['current_price'] = security_info.current_price
+            
+            if missing_fields or invalid_values:
+                log_data_quality_issue(
+                    logger, symbol, 'security_info', 
+                    'Missing or invalid data fields detected',
+                    'warning', missing_fields, invalid_values
+                )
+            
+            # Validate the security info
+            security_info.validate()
+            
+            # Cache the result
+            if use_cache:
+                cache.set(
+                    cache_key, 
+                    security_info, 
+                    data_type="security_info", 
+                    tags=[symbol, "security_info", "etf" if is_etf else "stock"]
+                )
+            
+            logger.info(f"Successfully retrieved {'ETF' if is_etf else 'stock'} info for {symbol}")
+            return security_info
+            
+        except Exception as e:
+            response_time = time.time() - start_time
+            
+            # Log failed API call
+            log_api_call(
+                logger, 
+                'yfinance', 
+                f'/ticker/{symbol}/info',
+                {'symbol': symbol},
+                response_time,
+                error=e
+            )
+            
+            logger.error(f"Error retrieving security info for {symbol}: {str(e)}")
+            raise DataRetrievalError(
+                f"Failed to retrieve security info for {symbol}: {str(e)}",
+                symbol=symbol,
+                data_source='yfinance',
+                original_exception=e
+            )
+    
+    # Alias for backward compatibility
+    get_stock_info = get_security_info
+
     def _rate_limit(self) -> None:
         """Apply rate limiting to avoid API throttling."""
         current_time = time.time()
@@ -85,125 +287,6 @@ class StockDataService:
         
         # If we get here, all attempts failed
         raise DataRetrievalError(f"Failed to retrieve data after {max_attempts} attempts: {str(last_exception)}")
-    
-    @monitor_performance('get_stock_info')
-    def get_stock_info(self, symbol: str, use_cache: bool = True) -> StockInfo:
-        """Get basic stock information.
-        
-        Args:
-            symbol: Stock ticker symbol
-            use_cache: Whether to use cached data if available
-            
-        Returns:
-            StockInfo object with basic stock information
-            
-        Raises:
-            DataRetrievalError: If data cannot be retrieved
-        """
-        logger.set_context(symbol=symbol, operation='get_stock_info')
-        logger.info(f"Retrieving stock info for {symbol}")
-        
-        # Generate cache key
-        cache_key = f"stock_info:{symbol}"
-        cache = get_cache_manager()
-        
-        # Try to get from cache first if caching is enabled
-        if use_cache:
-            cached_data = cache.get(cache_key)
-            if cached_data:
-                logger.info(f"Retrieved stock info for {symbol} from cache")
-                return cached_data
-        
-        start_time = time.time()
-        
-        try:
-            # Apply rate limiting before making requests
-            self._rate_limit()
-            
-            # Get stock information using yfinance
-            ticker = self._retry_with_backoff(yf.Ticker, symbol)
-            
-            self._rate_limit()
-            info = self._retry_with_backoff(lambda: ticker.info)
-            
-            # Log API call details
-            response_time = time.time() - start_time
-            log_api_call(
-                logger, 
-                'yfinance', 
-                f'/ticker/{symbol}/info',
-                {'symbol': symbol},
-                response_time,
-                200  # Assume success if no exception
-            )
-            
-            # Check for data quality issues
-            missing_fields = []
-            invalid_values = {}
-            
-            if not info.get('longName') and not info.get('shortName'):
-                missing_fields.append('company_name')
-            
-            current_price = info.get('currentPrice', info.get('regularMarketPrice', 0.0))
-            if current_price <= 0:
-                invalid_values['current_price'] = current_price
-            
-            if missing_fields or invalid_values:
-                log_data_quality_issue(
-                    logger, symbol, 'stock_info', 
-                    'Missing or invalid data fields detected',
-                    'warning', missing_fields, invalid_values
-                )
-            
-            # Extract relevant information
-            stock_info = StockInfo(
-                symbol=symbol,
-                company_name=info.get('longName', info.get('shortName', symbol)),
-                current_price=current_price,
-                market_cap=info.get('marketCap', 0.0),
-                pe_ratio=info.get('trailingPE'),
-                pb_ratio=info.get('priceToBook'),
-                dividend_yield=info.get('dividendYield'),
-                beta=info.get('beta'),
-                sector=info.get('sector'),
-                industry=info.get('industry')
-            )
-            
-            # Validate the stock info
-            stock_info.validate()
-            
-            # Cache the result
-            if use_cache:
-                cache.set(
-                    cache_key, 
-                    stock_info, 
-                    data_type="stock_info", 
-                    tags=[symbol, "stock_info"]
-                )
-            
-            logger.info(f"Successfully retrieved stock info for {symbol}")
-            return stock_info
-            
-        except Exception as e:
-            response_time = time.time() - start_time
-            
-            # Log failed API call
-            log_api_call(
-                logger, 
-                'yfinance', 
-                f'/ticker/{symbol}/info',
-                {'symbol': symbol},
-                response_time,
-                error=e
-            )
-            
-            logger.error(f"Error retrieving stock info for {symbol}: {str(e)}")
-            raise DataRetrievalError(
-                f"Failed to retrieve stock info for {symbol}: {str(e)}",
-                symbol=symbol,
-                data_source='yfinance',
-                original_exception=e
-            )
     
     def get_historical_data(
         self, 

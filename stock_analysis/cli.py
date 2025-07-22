@@ -1,7 +1,7 @@
 """Command-line interface for the Stock Analysis Dashboard.
 
-This module provides a comprehensive CLI for stock analysis operations including
-single stock analysis, batch processing, scheduling management, and configuration.
+This module provides a comprehensive CLI for stock and ETF analysis operations including
+single security analysis, batch processing, scheduling management, and configuration.
 """
 
 import argparse
@@ -21,8 +21,9 @@ from stock_analysis.utils.config import config
 from stock_analysis.utils.logging import get_logger
 from stock_analysis.utils.exceptions import StockAnalysisError, DataRetrievalError, CalculationError, ExportError
 from stock_analysis.models.data_models import (
-    AnalysisResult, StockInfo, FinancialRatios, LiquidityRatios, ProfitabilityRatios,
-    LeverageRatios, EfficiencyRatios, HealthScore, FairValueResult, SentimentResult
+    AnalysisResult, SecurityInfo, StockInfo, ETFInfo, FinancialRatios, LiquidityRatios, 
+    ProfitabilityRatios, LeverageRatios, EfficiencyRatios, HealthScore, FairValueResult, 
+    SentimentResult
 )
 
 logger = get_logger(__name__)
@@ -48,12 +49,12 @@ class ProgressIndicator:
         
         # Only update if progress changed significantly
         if abs(percentage - self.last_progress) >= 5 or percentage == 100:
-            print(f"\rProgress: {percentage:.1f}% ({progress.completed_stocks}/{progress.total_stocks} completed, "
-                  f"{progress.failed_stocks} failed)", end="", flush=True)
+            print(f"\rProgress: {percentage:.1f}% ({progress.completed_securities}/{progress.total_securities} completed, "
+                  f"{progress.failed_securities} failed)", end="", flush=True)
             self.last_progress = percentage
             
-            if progress.current_stock:
-                print(f" - Currently analyzing: {progress.current_stock}", end="", flush=True)
+            if progress.current_security:
+                print(f" - Currently analyzing: {progress.current_security}", end="", flush=True)
         
         if percentage == 100:
             print()  # New line when complete
@@ -67,21 +68,21 @@ def create_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog='stock-analysis',
-        description='Stock Analysis Dashboard - Comprehensive stock analysis with Power BI integration',
+        description='Stock Analysis Dashboard - Comprehensive stock and ETF analysis with Power BI integration',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Analyze a single stock
   stock-analysis analyze AAPL
   
-  # Analyze multiple stocks with verbose output
-  stock-analysis analyze AAPL MSFT GOOGL --verbose --export-format excel
+  # Analyze multiple stocks and ETFs
+  stock-analysis analyze AAPL MSFT SCHD IVV --verbose --export-format excel
   
-  # Analyze stocks from a file
-  stock-analysis batch stocks.txt --export-format csv
+  # Analyze securities from a file
+  stock-analysis batch securities.txt --export-format csv
   
   # Schedule daily analysis
-  stock-analysis schedule add daily-tech "AAPL,MSFT,GOOGL" --interval daily
+  stock-analysis schedule add daily-tech "AAPL,MSFT,SCHD" --interval daily
   
   # Start the scheduler
   stock-analysis schedule start
@@ -106,8 +107,8 @@ Examples:
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     
     # Analyze command
-    analyze_parser = subparsers.add_parser('analyze', help='Analyze one or more stocks')
-    analyze_parser.add_argument('symbols', nargs='+', help='Stock symbols to analyze')
+    analyze_parser = subparsers.add_parser('analyze', help='Analyze one or more securities (stocks or ETFs)')
+    analyze_parser.add_argument('symbols', nargs='+', help='Stock or ETF symbols to analyze')
     analyze_parser.add_argument('--export-format', '-f', choices=['csv', 'excel', 'json'],
                                default='excel', help='Export format (default: excel)')
     analyze_parser.add_argument('--output', '-o', type=str,
@@ -116,8 +117,8 @@ Examples:
                                help='Skip exporting results')
     
     # Batch command
-    batch_parser = subparsers.add_parser('batch', help='Batch analyze stocks from file')
-    batch_parser.add_argument('file', help='File containing stock symbols (one per line or CSV)')
+    batch_parser = subparsers.add_parser('batch', help='Batch analyze securities from file')
+    batch_parser.add_argument('file', help='File containing stock/ETF symbols (one per line or CSV)')
     batch_parser.add_argument('--export-format', '-f', choices=['csv', 'excel', 'json'],
                              default='excel', help='Export format (default: excel)')
     batch_parser.add_argument('--output', '-o', type=str,
@@ -127,7 +128,7 @@ Examples:
     batch_parser.add_argument('--max-workers', type=int, default=4,
                              help='Maximum number of worker threads (default: 4)')
     batch_parser.add_argument('--continue-on-error', action='store_true', default=True,
-                             help='Continue processing if individual stocks fail (default: enabled)')
+                             help='Continue processing if individual securities fail (default: enabled)')
     
     # Schedule command
     schedule_parser = subparsers.add_parser('schedule', help='Manage scheduled analysis jobs')
@@ -136,7 +137,7 @@ Examples:
     # Schedule add
     schedule_add_parser = schedule_subparsers.add_parser('add', help='Add a new scheduled job')
     schedule_add_parser.add_argument('job_id', help='Unique job identifier')
-    schedule_add_parser.add_argument('symbols', help='Comma-separated list of stock symbols')
+    schedule_add_parser.add_argument('symbols', help='Comma-separated list of stock/ETF symbols')
     schedule_add_parser.add_argument('--name', help='Human-readable job name')
     schedule_add_parser.add_argument('--interval', choices=['daily', 'weekly', 'hourly'],
                                    default='daily', help='Schedule interval (default: daily)')
@@ -269,7 +270,7 @@ def handle_analyze_command(args) -> int:
         int: Exit code (0 for success, 1 for error)
     """
     try:
-        print(f"Analyzing {len(args.symbols)} stock(s): {', '.join(args.symbols)}")
+        print(f"Analyzing {len(args.symbols)} security(s): {', '.join(args.symbols)}")
         
         # Create orchestrator
         orchestrator = StockAnalysisOrchestrator(
@@ -284,15 +285,37 @@ def handle_analyze_command(args) -> int:
         
         # Perform analysis
         if len(args.symbols) == 1:
-            # Single stock analysis
-            result = orchestrator.analyze_single_stock(args.symbols[0])
+            # Single security analysis
+            result = orchestrator.analyze_single_security(args.symbols[0])
             results = [result]
             
             # Display summary
             print(f"\nAnalysis completed for {result.symbol}")
-            print(f"Company: {result.stock_info.company_name}")
-            print(f"Current Price: ${result.stock_info.current_price:.2f}")
-            print(f"Health Score: {result.health_score.overall_score:.1f}/100")
+            
+            if isinstance(result.stock_info, ETFInfo):
+                # ETF summary
+                print(f"ETF: {result.stock_info.name}")
+                print(f"Current Price: ${result.stock_info.current_price:.2f}")
+                print(f"NAV: ${result.stock_info.nav:.2f}" if result.stock_info.nav else "NAV: Not available")
+                print(f"Expense Ratio: {result.stock_info.expense_ratio*100:.2f}%" if result.stock_info.expense_ratio else "Expense Ratio: Not available")
+                print(f"Assets Under Management: ${result.stock_info.assets_under_management/1e9:.2f}B" if result.stock_info.assets_under_management else "AUM: Not available")
+                print(f"Category: {result.stock_info.category}" if result.stock_info.category else "Category: Not available")
+                if result.stock_info.holdings:
+                    print(f"Number of Holdings: {len(result.stock_info.holdings)}")
+                    print("\nTop 5 Holdings:")
+                    for holding in result.stock_info.holdings[:5]:
+                        print(f"  {holding['symbol']} ({holding['name']}): {holding['weight']*100:.2f}%")
+            else:
+                # Stock summary
+                print(f"Company: {result.stock_info.company_name}")
+                print(f"Current Price: ${result.stock_info.current_price:.2f}")
+                print(f"Sector: {result.stock_info.sector}")
+                print(f"Industry: {result.stock_info.industry}")
+                print(f"P/E Ratio: {result.stock_info.pe_ratio:.2f}" if result.stock_info.pe_ratio else "P/E Ratio: Not available")
+                print(f"P/B Ratio: {result.stock_info.pb_ratio:.2f}" if result.stock_info.pb_ratio else "P/B Ratio: Not available")
+            
+            # Common metrics
+            print(f"\nHealth Score: {result.health_score.overall_score:.1f}/100")
             print(f"Recommendation: {result.fair_value.recommendation}")
             print(f"Fair Value: ${result.fair_value.average_fair_value:.2f}")
             print(f"Sentiment: {result.sentiment.overall_sentiment:.2f}")
@@ -302,13 +325,13 @@ def handle_analyze_command(args) -> int:
                 for i, rec in enumerate(result.recommendations, 1):
                     print(f"  {i}. {rec}")
         else:
-            # Multiple stocks analysis
-            report = orchestrator.analyze_multiple_stocks(args.symbols)
+            # Multiple securities analysis
+            report = orchestrator.analyze_multiple_securities(args.symbols)
             results = report.results
             
             # Display summary
             print(f"\nBatch analysis completed:")
-            print(f"Total stocks: {report.total_stocks}")
+            print(f"Total securities: {report.total_securities}")
             print(f"Successful: {report.successful_analyses}")
             print(f"Failed: {report.failed_analyses}")
             print(f"Success rate: {report.success_rate:.1f}%")
@@ -319,15 +342,32 @@ def handle_analyze_command(args) -> int:
             
             if args.verbose and results:
                 print("\nAnalysis Summary:")
+                
+                # Count stocks vs ETFs
+                stocks = [r for r in results if isinstance(r.stock_info, StockInfo)]
+                etfs = [r for r in results if isinstance(r.stock_info, ETFInfo)]
+                
+                print(f"  Stocks analyzed: {len(stocks)}")
+                print(f"  ETFs analyzed: {len(etfs)}")
+                
+                # Recommendations
                 buy_count = sum(1 for r in results if r.fair_value.recommendation == "BUY")
                 sell_count = sum(1 for r in results if r.fair_value.recommendation == "SELL")
                 hold_count = sum(1 for r in results if r.fair_value.recommendation == "HOLD")
                 avg_health = sum(r.health_score.overall_score for r in results) / len(results)
                 
-                print(f"  Buy recommendations: {buy_count}")
+                print(f"\n  Buy recommendations: {buy_count}")
                 print(f"  Hold recommendations: {hold_count}")
                 print(f"  Sell recommendations: {sell_count}")
                 print(f"  Average health score: {avg_health:.1f}/100")
+                
+                # ETF-specific summary
+                if etfs:
+                    print("\n  ETF Summary:")
+                    avg_expense = sum(e.stock_info.expense_ratio for e in etfs if e.stock_info.expense_ratio) / len([e for e in etfs if e.stock_info.expense_ratio])
+                    total_aum = sum(e.stock_info.assets_under_management for e in etfs if e.stock_info.assets_under_management)
+                    print(f"    Average expense ratio: {avg_expense*100:.2f}%")
+                    print(f"    Total AUM: ${total_aum/1e9:.2f}B")
         
         # Export results if requested
         if not args.no_export and results:

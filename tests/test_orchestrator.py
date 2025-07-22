@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from stock_analysis.orchestrator import StockAnalysisOrchestrator, AnalysisProgress, AnalysisReport
 from stock_analysis.models.data_models import (
-    StockInfo, FinancialRatios, LiquidityRatios, ProfitabilityRatios,
+    StockInfo, ETFInfo, FinancialRatios, LiquidityRatios, ProfitabilityRatios,
     LeverageRatios, EfficiencyRatios, HealthScore, FairValueResult,
     SentimentResult, AnalysisResult
 )
@@ -25,19 +25,19 @@ class TestAnalysisProgress:
     def test_completion_percentage_calculation(self):
         """Test completion percentage calculation."""
         progress = AnalysisProgress(
-            total_stocks=10,
-            completed_stocks=3,
-            failed_stocks=2
+            total_securities=10,
+            completed_securities=3,
+            failed_securities=2
         )
         
         assert progress.completion_percentage == 30.0
     
     def test_completion_percentage_zero_total(self):
-        """Test completion percentage with zero total stocks."""
+        """Test completion percentage with zero total securities."""
         progress = AnalysisProgress(
-            total_stocks=0,
-            completed_stocks=0,
-            failed_stocks=0
+            total_securities=0,
+            completed_securities=0,
+            failed_securities=0
         )
         
         assert progress.completion_percentage == 0.0
@@ -45,19 +45,19 @@ class TestAnalysisProgress:
     def test_success_rate_calculation(self):
         """Test success rate calculation."""
         progress = AnalysisProgress(
-            total_stocks=10,
-            completed_stocks=7,
-            failed_stocks=3
+            total_securities=10,
+            completed_securities=7,
+            failed_securities=3
         )
         
         assert progress.success_rate == 70.0
     
     def test_success_rate_no_processed(self):
-        """Test success rate with no processed stocks."""
+        """Test success rate with no processed securities."""
         progress = AnalysisProgress(
-            total_stocks=10,
-            completed_stocks=0,
-            failed_stocks=0
+            total_securities=10,
+            completed_securities=0,
+            failed_securities=0
         )
         
         assert progress.success_rate == 0.0
@@ -102,6 +102,24 @@ class TestStockAnalysisOrchestrator:
             beta=1.2,
             sector="Technology",
             industry="Consumer Electronics"
+        )
+    
+    @pytest.fixture
+    def sample_etf_info(self):
+        """Create sample ETF info for testing."""
+        return ETFInfo(
+            symbol="SPY",
+            name="SPDR S&P 500 ETF Trust",
+            current_price=450.0,
+            market_cap=450000000000,
+            beta=1.0,
+            expense_ratio=0.0095,
+            assets_under_management=450000000000,
+            nav=450.0,
+            category="Large Blend",
+            asset_allocation={"Stocks": 0.98, "Cash": 0.02},
+            holdings=[("AAPL", 0.07), ("MSFT", 0.06)],
+            dividend_yield=0.015
         )
     
     @pytest.fixture
@@ -229,7 +247,7 @@ class TestStockAnalysisOrchestrator:
         mock_sentiment.return_value = mock_sentiment_analyzer
         
         # Configure mock returns
-        mock_stock_service.get_stock_info.return_value = sample_stock_info
+        mock_stock_service.get_security_info.return_value = sample_stock_info
         mock_stock_service.get_financial_statements.return_value = Mock()  # DataFrame mock
         mock_financial_engine.calculate_financial_ratios.return_value = sample_financial_ratios
         mock_financial_engine.assess_company_health.return_value = sample_health_score
@@ -239,7 +257,7 @@ class TestStockAnalysisOrchestrator:
         
         # Create orchestrator and analyze
         orchestrator = StockAnalysisOrchestrator()
-        result = orchestrator.analyze_single_stock("AAPL")
+        result = orchestrator.analyze_single_security("AAPL")
         
         # Verify result
         assert isinstance(result, AnalysisResult)
@@ -252,7 +270,7 @@ class TestStockAnalysisOrchestrator:
         assert len(result.recommendations) > 0
         
         # Verify service calls
-        mock_stock_service.get_stock_info.assert_called_once_with("AAPL")
+        mock_stock_service.get_security_info.assert_called_once_with("AAPL")
         assert mock_stock_service.get_financial_statements.call_count == 3
         mock_financial_engine.calculate_financial_ratios.assert_called_once()
         mock_financial_engine.assess_company_health.assert_called_once()
@@ -261,33 +279,81 @@ class TestStockAnalysisOrchestrator:
         mock_sentiment_analyzer.analyze_sentiment.assert_called_once()
     
     @patch('stock_analysis.orchestrator.StockDataService')
-    def test_analyze_single_stock_data_retrieval_error(self, mock_stock_data):
-        """Test single stock analysis with data retrieval error."""
+    @patch('stock_analysis.orchestrator.FinancialAnalysisEngine')
+    @patch('stock_analysis.orchestrator.ValuationEngine')
+    @patch('stock_analysis.orchestrator.NewsSentimentAnalyzer')
+    def test_analyze_single_etf_success(self, mock_sentiment, mock_valuation, mock_financial, mock_stock_data,
+                                      sample_etf_info, sample_health_score, sample_fair_value, sample_sentiment):
+        """Test successful single ETF analysis."""
+        # Setup mocks
+        mock_stock_service = Mock()
+        mock_financial_engine = Mock()
+        mock_valuation_engine = Mock()
+        mock_sentiment_analyzer = Mock()
+        
+        mock_stock_data.return_value = mock_stock_service
+        mock_financial.return_value = mock_financial_engine
+        mock_valuation.return_value = mock_valuation_engine
+        mock_sentiment.return_value = mock_sentiment_analyzer
+        
+        # Configure mock returns
+        mock_stock_service.get_security_info.return_value = sample_etf_info
+        mock_financial_engine.assess_etf_health.return_value = sample_health_score
+        mock_valuation_engine.calculate_etf_fair_value.return_value = sample_fair_value
+        mock_sentiment_analyzer.get_news_articles.return_value = []
+        mock_sentiment_analyzer.analyze_sentiment.return_value = sample_sentiment
+        
+        # Create orchestrator and analyze
+        orchestrator = StockAnalysisOrchestrator()
+        result = orchestrator.analyze_single_security("SPY")
+        
+        # Verify result
+        assert isinstance(result, AnalysisResult)
+        assert result.symbol == "SPY"
+        assert result.stock_info == sample_etf_info
+        assert result.financial_ratios is None  # ETFs don't have financial ratios
+        assert result.health_score == sample_health_score
+        assert result.fair_value == sample_fair_value
+        assert result.sentiment == sample_sentiment
+        assert len(result.recommendations) > 0
+        
+        # Verify service calls
+        mock_stock_service.get_security_info.assert_called_once_with("SPY")
+        mock_stock_service.get_financial_statements.assert_not_called()  # ETFs don't need financial statements
+        mock_financial_engine.calculate_financial_ratios.assert_not_called()  # ETFs don't need financial ratios
+        mock_financial_engine.assess_etf_health.assert_called_once()
+        mock_valuation_engine.calculate_etf_fair_value.assert_called_once()
+        mock_sentiment_analyzer.get_news_articles.assert_called_once()
+        mock_sentiment_analyzer.analyze_sentiment.assert_called_once()
+    
+    @patch('stock_analysis.orchestrator.StockDataService')
+    def test_analyze_single_security_data_retrieval_error(self, mock_stock_data):
+        """Test single security analysis with data retrieval error."""
         mock_stock_service = Mock()
         mock_stock_data.return_value = mock_stock_service
-        mock_stock_service.get_stock_info.side_effect = DataRetrievalError("Stock not found")
+        mock_stock_service.get_security_info.side_effect = DataRetrievalError("Security not found")
         
         orchestrator = StockAnalysisOrchestrator()
         
         with pytest.raises(DataRetrievalError):
-            orchestrator.analyze_single_stock("INVALID")
+            orchestrator.analyze_single_security("INVALID")
     
-    def test_analyze_multiple_stocks_sequential(self, orchestrator):
-        """Test multiple stock analysis in sequential mode."""
-        # Mock the analyze_single_stock method
+    def test_analyze_multiple_securities_sequential(self, orchestrator):
+        """Test multiple security analysis in sequential mode."""
+        # Mock the analyze_single_security method
         mock_result1 = Mock(spec=AnalysisResult)
         mock_result1.symbol = "AAPL"
         mock_result2 = Mock(spec=AnalysisResult)
-        mock_result2.symbol = "GOOGL"
+        mock_result2.symbol = "SPY"
         
-        orchestrator.analyze_single_stock = Mock(side_effect=[mock_result1, mock_result2])
+        orchestrator.analyze_single_security = Mock(side_effect=[mock_result1, mock_result2])
         
-        symbols = ["AAPL", "GOOGL"]
-        report = orchestrator.analyze_multiple_stocks(symbols)
+        symbols = ["AAPL", "SPY"]
+        report = orchestrator.analyze_multiple_securities(symbols)
         
         # Verify report
         assert isinstance(report, AnalysisReport)
-        assert report.total_stocks == 2
+        assert report.total_securities == 2
         assert report.successful_analyses == 2
         assert report.failed_analyses == 0
         assert report.success_rate == 100.0
@@ -295,12 +361,12 @@ class TestStockAnalysisOrchestrator:
         assert len(report.failed_symbols) == 0
         
         # Verify method calls
-        assert orchestrator.analyze_single_stock.call_count == 2
-        orchestrator.analyze_single_stock.assert_any_call("AAPL")
-        orchestrator.analyze_single_stock.assert_any_call("GOOGL")
+        assert orchestrator.analyze_single_security.call_count == 2
+        orchestrator.analyze_single_security.assert_any_call("AAPL")
+        orchestrator.analyze_single_security.assert_any_call("SPY")
     
-    def test_analyze_multiple_stocks_with_failures(self, orchestrator):
-        """Test multiple stock analysis with some failures."""
+    def test_analyze_multiple_securities_with_failures(self, orchestrator):
+        """Test multiple security analysis with some failures."""
         mock_result = Mock(spec=AnalysisResult)
         mock_result.symbol = "AAPL"
         
@@ -308,17 +374,17 @@ class TestStockAnalysisOrchestrator:
             if symbol == "AAPL":
                 return mock_result
             elif symbol == "INVALID":
-                raise DataRetrievalError("Stock not found")
+                raise DataRetrievalError("Security not found")
             else:
                 raise CalculationError("Calculation failed")
         
-        orchestrator.analyze_single_stock = Mock(side_effect=mock_analyze)
+        orchestrator.analyze_single_security = Mock(side_effect=mock_analyze)
         
         symbols = ["AAPL", "INVALID", "GOOGL"]
-        report = orchestrator.analyze_multiple_stocks(symbols)
+        report = orchestrator.analyze_multiple_securities(symbols)
         
         # Verify report
-        assert report.total_stocks == 3
+        assert report.total_securities == 3
         assert report.successful_analyses == 1
         assert report.failed_analyses == 2
         assert report.success_rate == pytest.approx(33.33, rel=1e-2)
@@ -329,33 +395,33 @@ class TestStockAnalysisOrchestrator:
         assert "DataRetrievalError" in report.error_summary
         assert "CalculationError" in report.error_summary
     
-    def test_analyze_multiple_stocks_parallel(self):
-        """Test multiple stock analysis in parallel mode."""
+    def test_analyze_multiple_securities_parallel(self):
+        """Test multiple security analysis in parallel mode."""
         orchestrator = StockAnalysisOrchestrator(
             max_workers=2,
             enable_parallel_processing=True
         )
         
-        # Mock the analyze_single_stock method
+        # Mock the analyze_single_security method
         mock_result1 = Mock(spec=AnalysisResult)
         mock_result1.symbol = "AAPL"
         mock_result2 = Mock(spec=AnalysisResult)
         mock_result2.symbol = "GOOGL"
         
-        orchestrator.analyze_single_stock = Mock(side_effect=[mock_result1, mock_result2])
+        orchestrator.analyze_single_security = Mock(side_effect=[mock_result1, mock_result2])
         
         symbols = ["AAPL", "GOOGL"]
-        report = orchestrator.analyze_multiple_stocks(symbols)
+        report = orchestrator.analyze_multiple_securities(symbols)
         
         # Verify report
-        assert report.total_stocks == 2
+        assert report.total_securities == 2
         assert report.successful_analyses == 2
         assert report.failed_analyses == 0
         assert report.success_rate == 100.0
         assert len(report.results) == 2
     
-    def test_analyze_multiple_stocks_stop_on_error(self):
-        """Test multiple stock analysis stopping on first error."""
+    def test_analyze_multiple_securities_stop_on_error(self):
+        """Test multiple security analysis stopping on first error."""
         orchestrator = StockAnalysisOrchestrator(continue_on_error=False)
         
         def mock_analyze(symbol):
@@ -364,18 +430,18 @@ class TestStockAnalysisOrchestrator:
                 mock_result.symbol = "AAPL"
                 return mock_result
             else:
-                raise DataRetrievalError("Stock not found")
+                raise DataRetrievalError("Security not found")
         
-        orchestrator.analyze_single_stock = Mock(side_effect=mock_analyze)
+        orchestrator.analyze_single_security = Mock(side_effect=mock_analyze)
         
         symbols = ["AAPL", "INVALID", "GOOGL"]
-        report = orchestrator.analyze_multiple_stocks(symbols)
+        report = orchestrator.analyze_multiple_securities(symbols)
         
         # Should stop after first error
         assert report.successful_analyses == 1
         assert report.failed_analyses == 1
         assert len(report.failed_symbols) == 1
-        assert orchestrator.analyze_single_stock.call_count == 2  # AAPL + INVALID
+        assert orchestrator.analyze_single_security.call_count == 2  # AAPL + INVALID
     
     def test_generate_recommendations_buy_scenario(self, sample_stock_info, sample_financial_ratios,
                                                  sample_health_score, sample_sentiment):
@@ -421,6 +487,73 @@ class TestStockAnalysisOrchestrator:
         
         assert len(recommendations) > 0
         assert any("Sell" in rec for rec in recommendations)
+    
+    def test_generate_recommendations_health_based(self, sample_stock_info, sample_financial_ratios,
+                                                 sample_fair_value, sample_sentiment):
+        """Test health-based recommendations."""
+        orchestrator = StockAnalysisOrchestrator()
+        
+        # Test excellent health
+        excellent_health = HealthScore(
+            overall_score=85.0,
+            financial_strength=90.0,
+            profitability_health=80.0,
+            liquidity_health=85.0,
+            risk_assessment="Low"
+        )
+        
+        recommendations = orchestrator._generate_recommendations(
+            "AAPL", sample_stock_info, sample_financial_ratios,
+            excellent_health, sample_fair_value, sample_sentiment
+        )
+        
+        assert any("Excellent financial health" in rec for rec in recommendations)
+        assert any("Low risk profile" in rec for rec in recommendations)
+    
+    def test_generate_recommendations_etf_buy_scenario(self, sample_etf_info, sample_health_score, sample_sentiment):
+        """Test recommendation generation for ETF buy scenario."""
+        orchestrator = StockAnalysisOrchestrator()
+        
+        # Create buy scenario
+        fair_value = FairValueResult(
+            current_price=450.0,
+            dcf_value=None,  # Not applicable for ETFs
+            average_fair_value=460.0,
+            recommendation="BUY",
+            confidence_level=0.8
+        )
+        
+        recommendations = orchestrator._generate_recommendations(
+            "SPY", sample_etf_info, None,  # No financial ratios for ETFs
+            sample_health_score, fair_value, sample_sentiment
+        )
+        
+        assert len(recommendations) > 0
+        assert any("Buy" in rec for rec in recommendations)
+        assert any("expense ratio" in rec.lower() for rec in recommendations)
+        assert any("holdings" in rec.lower() for rec in recommendations)
+    
+    def test_generate_recommendations_etf_sell_scenario(self, sample_etf_info, sample_health_score, sample_sentiment):
+        """Test recommendation generation for ETF sell scenario."""
+        orchestrator = StockAnalysisOrchestrator()
+        
+        # Create sell scenario
+        fair_value = FairValueResult(
+            current_price=450.0,
+            dcf_value=None,  # Not applicable for ETFs
+            average_fair_value=430.0,
+            recommendation="SELL",
+            confidence_level=0.9
+        )
+        
+        recommendations = orchestrator._generate_recommendations(
+            "SPY", sample_etf_info, None,  # No financial ratios for ETFs
+            sample_health_score, fair_value, sample_sentiment
+        )
+        
+        assert len(recommendations) > 0
+        assert any("Sell" in rec for rec in recommendations)
+        assert any("trading above" in rec.lower() for rec in recommendations)
     
     def test_generate_recommendations_health_based(self, sample_stock_info, sample_financial_ratios,
                                                  sample_fair_value, sample_sentiment):

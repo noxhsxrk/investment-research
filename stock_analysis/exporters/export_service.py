@@ -1,6 +1,6 @@
 """Export service for Power BI integration.
 
-This module provides comprehensive export functionality for stock analysis results
+This module provides comprehensive export functionality for analysis results
 in formats optimized for Power BI consumption including CSV, Excel, and JSON.
 """
 
@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Union
 
 import pandas as pd
 
-from stock_analysis.models.data_models import AnalysisResult
+from stock_analysis.models.data_models import AnalysisResult, StockInfo, ETFInfo
 from stock_analysis.utils.exceptions import ExportError
 from stock_analysis.utils.logging import get_logger
 
@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 
 
 class ExportService:
-    """Service for exporting stock analysis results in Power BI compatible formats.
+    """Service for exporting analysis results in Power BI compatible formats.
     
     Supports CSV, Excel, and JSON exports with proper schemas and metadata
     for seamless Power BI integration.
@@ -130,13 +130,21 @@ class ExportService:
                 
                 # Stock info sheet
                 stock_info_data = self._create_stock_info_data(data)
-                stock_info_df = pd.DataFrame(stock_info_data)
-                stock_info_df.to_excel(writer, sheet_name='Stock_Info', index=False)
+                if stock_info_data:  # Only create sheet if we have stock data
+                    stock_info_df = pd.DataFrame(stock_info_data)
+                    stock_info_df.to_excel(writer, sheet_name='Stock_Info', index=False)
                 
-                # Financial ratios sheet
+                # ETF info sheet
+                etf_data = self._create_etf_data(data)
+                if etf_data:  # Only create sheet if we have ETF data
+                    etf_df = pd.DataFrame(etf_data)
+                    etf_df.to_excel(writer, sheet_name='ETF_Info', index=False)
+                
+                # Financial ratios sheet (stocks only)
                 ratios_data = self._create_financial_ratios_data(data)
-                ratios_df = pd.DataFrame(ratios_data)
-                ratios_df.to_excel(writer, sheet_name='Financial_Ratios', index=False)
+                if ratios_data:  # Only create sheet if we have stock data
+                    ratios_df = pd.DataFrame(ratios_data)
+                    ratios_df.to_excel(writer, sheet_name='Financial_Ratios', index=False)
                 
                 # Health scores sheet
                 health_data = self._create_health_score_data(data)
@@ -232,43 +240,16 @@ class ExportService:
         Returns:
             Dict: Flattened dictionary with all data points.
         """
+        # Common fields for both stocks and ETFs
         flattened = {
             # Basic info
             'Symbol': result.symbol,
             'Timestamp': result.timestamp.isoformat(),
-            'Company_Name': result.stock_info.company_name,
+            'Security_Type': 'ETF' if isinstance(result.stock_info, ETFInfo) else 'Stock',
+            'Name': result.stock_info.name,
             'Current_Price': result.stock_info.current_price,
             'Market_Cap': result.stock_info.market_cap,
-            'Sector': result.stock_info.sector,
-            'Industry': result.stock_info.industry,
-            
-            # Stock ratios
-            'PE_Ratio': result.stock_info.pe_ratio,
-            'PB_Ratio': result.stock_info.pb_ratio,
-            'Dividend_Yield': result.stock_info.dividend_yield,
             'Beta': result.stock_info.beta,
-            
-            # Liquidity ratios
-            'Current_Ratio': result.financial_ratios.liquidity_ratios.current_ratio,
-            'Quick_Ratio': result.financial_ratios.liquidity_ratios.quick_ratio,
-            'Cash_Ratio': result.financial_ratios.liquidity_ratios.cash_ratio,
-            
-            # Profitability ratios
-            'Gross_Margin': result.financial_ratios.profitability_ratios.gross_margin,
-            'Operating_Margin': result.financial_ratios.profitability_ratios.operating_margin,
-            'Net_Profit_Margin': result.financial_ratios.profitability_ratios.net_profit_margin,
-            'Return_On_Assets': result.financial_ratios.profitability_ratios.return_on_assets,
-            'Return_On_Equity': result.financial_ratios.profitability_ratios.return_on_equity,
-            
-            # Leverage ratios
-            'Debt_To_Equity': result.financial_ratios.leverage_ratios.debt_to_equity,
-            'Debt_To_Assets': result.financial_ratios.leverage_ratios.debt_to_assets,
-            'Interest_Coverage': result.financial_ratios.leverage_ratios.interest_coverage,
-            
-            # Efficiency ratios
-            'Asset_Turnover': result.financial_ratios.efficiency_ratios.asset_turnover,
-            'Inventory_Turnover': result.financial_ratios.efficiency_ratios.inventory_turnover,
-            'Receivables_Turnover': result.financial_ratios.efficiency_ratios.receivables_turnover,
             
             # Health scores
             'Overall_Health_Score': result.health_score.overall_score,
@@ -296,6 +277,79 @@ class ExportService:
             'Recommendations': '; '.join(result.recommendations)
         }
         
+        if isinstance(result.stock_info, ETFInfo):
+            # ETF-specific fields
+            etf_info = result.stock_info
+            flattened.update({
+                'Expense_Ratio': etf_info.expense_ratio,
+                'Assets_Under_Management': etf_info.assets_under_management,
+                'NAV': etf_info.nav,
+                'Category': etf_info.category,
+                'Asset_Allocation': json.dumps(etf_info.asset_allocation) if etf_info.asset_allocation else None,
+                'Holdings_Count': len(etf_info.holdings) if etf_info.holdings else 0,
+                'Top_Holdings': json.dumps(etf_info.holdings[:10]) if etf_info.holdings else None,
+                'ETF_Dividend_Yield': etf_info.dividend_yield,
+                
+                # Set stock-specific fields to None
+                'Company_Name': None,
+                'Sector': None,
+                'Industry': None,
+                'PE_Ratio': None,
+                'PB_Ratio': None,
+                'Stock_Dividend_Yield': None,
+                'Current_Ratio': None,
+                'Quick_Ratio': None,
+                'Cash_Ratio': None,
+                'Gross_Margin': None,
+                'Operating_Margin': None,
+                'Net_Profit_Margin': None,
+                'Return_On_Assets': None,
+                'Return_On_Equity': None,
+                'Debt_To_Equity': None,
+                'Debt_To_Assets': None,
+                'Interest_Coverage': None,
+                'Asset_Turnover': None,
+                'Inventory_Turnover': None,
+                'Receivables_Turnover': None
+            })
+        else:
+            # Stock-specific fields
+            stock_info = result.stock_info
+            flattened.update({
+                'Company_Name': stock_info.company_name,
+                'Sector': stock_info.sector,
+                'Industry': stock_info.industry,
+                'PE_Ratio': stock_info.pe_ratio,
+                'PB_Ratio': stock_info.pb_ratio,
+                'Stock_Dividend_Yield': stock_info.dividend_yield,
+                
+                # Financial ratios
+                'Current_Ratio': result.financial_ratios.liquidity_ratios.current_ratio if result.financial_ratios.liquidity_ratios else None,
+                'Quick_Ratio': result.financial_ratios.liquidity_ratios.quick_ratio if result.financial_ratios.liquidity_ratios else None,
+                'Cash_Ratio': result.financial_ratios.liquidity_ratios.cash_ratio if result.financial_ratios.liquidity_ratios else None,
+                'Gross_Margin': result.financial_ratios.profitability_ratios.gross_margin if result.financial_ratios.profitability_ratios else None,
+                'Operating_Margin': result.financial_ratios.profitability_ratios.operating_margin if result.financial_ratios.profitability_ratios else None,
+                'Net_Profit_Margin': result.financial_ratios.profitability_ratios.net_profit_margin if result.financial_ratios.profitability_ratios else None,
+                'Return_On_Assets': result.financial_ratios.profitability_ratios.return_on_assets if result.financial_ratios.profitability_ratios else None,
+                'Return_On_Equity': result.financial_ratios.profitability_ratios.return_on_equity if result.financial_ratios.profitability_ratios else None,
+                'Debt_To_Equity': result.financial_ratios.leverage_ratios.debt_to_equity if result.financial_ratios.leverage_ratios else None,
+                'Debt_To_Assets': result.financial_ratios.leverage_ratios.debt_to_assets if result.financial_ratios.leverage_ratios else None,
+                'Interest_Coverage': result.financial_ratios.leverage_ratios.interest_coverage if result.financial_ratios.leverage_ratios else None,
+                'Asset_Turnover': result.financial_ratios.efficiency_ratios.asset_turnover if result.financial_ratios.efficiency_ratios else None,
+                'Inventory_Turnover': result.financial_ratios.efficiency_ratios.inventory_turnover if result.financial_ratios.efficiency_ratios else None,
+                'Receivables_Turnover': result.financial_ratios.efficiency_ratios.receivables_turnover if result.financial_ratios.efficiency_ratios else None,
+                
+                # Set ETF-specific fields to None
+                'Expense_Ratio': None,
+                'Assets_Under_Management': None,
+                'NAV': None,
+                'Category': None,
+                'Asset_Allocation': None,
+                'Holdings_Count': None,
+                'Top_Holdings': None,
+                'ETF_Dividend_Yield': None
+            })
+        
         return flattened
     
     def _create_summary_data(self, data: List[AnalysisResult]) -> List[Dict]:
@@ -309,9 +363,11 @@ class ExportService:
         """
         summary_data = []
         for result in data:
-            summary_data.append({
+            is_etf = isinstance(result.stock_info, ETFInfo)
+            base_info = {
                 'Symbol': result.symbol,
-                'Company_Name': result.stock_info.company_name,
+                'Security_Type': 'ETF' if is_etf else 'Stock',
+                'Name': result.stock_info.name,
                 'Timestamp': result.timestamp.isoformat(),
                 'Current_Price': result.stock_info.current_price,
                 'Market_Cap': result.stock_info.market_cap,
@@ -319,10 +375,41 @@ class ExportService:
                 'Risk_Assessment': result.health_score.risk_assessment,
                 'Valuation_Recommendation': result.fair_value.recommendation,
                 'Average_Fair_Value': result.fair_value.average_fair_value,
-                'Overall_Sentiment': result.sentiment.overall_sentiment,
-                'Sector': result.stock_info.sector,
-                'Industry': result.stock_info.industry
-            })
+                'Overall_Sentiment': result.sentiment.overall_sentiment
+            }
+            
+            if is_etf:
+                etf_info = result.stock_info
+                base_info.update({
+                    'Category': etf_info.category,
+                    'Expense_Ratio': etf_info.expense_ratio,
+                    'Assets_Under_Management': etf_info.assets_under_management,
+                    'NAV': etf_info.nav,
+                    'ETF_Dividend_Yield': etf_info.dividend_yield,
+                    'Holdings_Count': len(etf_info.holdings) if etf_info.holdings else 0,
+                    'Sector': None,
+                    'Industry': None,
+                    'PE_Ratio': None,
+                    'PB_Ratio': None,
+                    'Stock_Dividend_Yield': None
+                })
+            else:
+                stock_info = result.stock_info
+                base_info.update({
+                    'Sector': stock_info.sector,
+                    'Industry': stock_info.industry,
+                    'PE_Ratio': stock_info.pe_ratio,
+                    'PB_Ratio': stock_info.pb_ratio,
+                    'Stock_Dividend_Yield': stock_info.dividend_yield,
+                    'Category': None,
+                    'Expense_Ratio': None,
+                    'Assets_Under_Management': None,
+                    'NAV': None,
+                    'ETF_Dividend_Yield': None,
+                    'Holdings_Count': None
+                })
+            
+            summary_data.append(base_info)
         return summary_data
     
     def _create_stock_info_data(self, data: List[AnalysisResult]) -> List[Dict]:
@@ -336,18 +423,23 @@ class ExportService:
         """
         stock_info_data = []
         for result in data:
+            # Skip ETFs
+            if isinstance(result.stock_info, ETFInfo):
+                continue
+                
+            stock_info = result.stock_info
             stock_info_data.append({
                 'Symbol': result.symbol,
-                'Company_Name': result.stock_info.company_name,
+                'Company_Name': stock_info.company_name,
                 'Timestamp': result.timestamp.isoformat(),
-                'Current_Price': result.stock_info.current_price,
-                'Market_Cap': result.stock_info.market_cap,
-                'PE_Ratio': result.stock_info.pe_ratio,
-                'PB_Ratio': result.stock_info.pb_ratio,
-                'Dividend_Yield': result.stock_info.dividend_yield,
-                'Beta': result.stock_info.beta,
-                'Sector': result.stock_info.sector,
-                'Industry': result.stock_info.industry
+                'Current_Price': stock_info.current_price,
+                'Market_Cap': stock_info.market_cap,
+                'PE_Ratio': stock_info.pe_ratio,
+                'PB_Ratio': stock_info.pb_ratio,
+                'Dividend_Yield': stock_info.dividend_yield,
+                'Beta': stock_info.beta,
+                'Sector': stock_info.sector,
+                'Industry': stock_info.industry
             })
         return stock_info_data
     
@@ -362,27 +454,31 @@ class ExportService:
         """
         ratios_data = []
         for result in data:
+            # Skip ETFs as they don't have traditional financial ratios
+            if isinstance(result.stock_info, ETFInfo):
+                continue
+                
             ratios_data.append({
                 'Symbol': result.symbol,
                 'Timestamp': result.timestamp.isoformat(),
                 # Liquidity ratios
-                'Current_Ratio': result.financial_ratios.liquidity_ratios.current_ratio,
-                'Quick_Ratio': result.financial_ratios.liquidity_ratios.quick_ratio,
-                'Cash_Ratio': result.financial_ratios.liquidity_ratios.cash_ratio,
+                'Current_Ratio': result.financial_ratios.liquidity_ratios.current_ratio if result.financial_ratios.liquidity_ratios else None,
+                'Quick_Ratio': result.financial_ratios.liquidity_ratios.quick_ratio if result.financial_ratios.liquidity_ratios else None,
+                'Cash_Ratio': result.financial_ratios.liquidity_ratios.cash_ratio if result.financial_ratios.liquidity_ratios else None,
                 # Profitability ratios
-                'Gross_Margin': result.financial_ratios.profitability_ratios.gross_margin,
-                'Operating_Margin': result.financial_ratios.profitability_ratios.operating_margin,
-                'Net_Profit_Margin': result.financial_ratios.profitability_ratios.net_profit_margin,
-                'Return_On_Assets': result.financial_ratios.profitability_ratios.return_on_assets,
-                'Return_On_Equity': result.financial_ratios.profitability_ratios.return_on_equity,
+                'Gross_Margin': result.financial_ratios.profitability_ratios.gross_margin if result.financial_ratios.profitability_ratios else None,
+                'Operating_Margin': result.financial_ratios.profitability_ratios.operating_margin if result.financial_ratios.profitability_ratios else None,
+                'Net_Profit_Margin': result.financial_ratios.profitability_ratios.net_profit_margin if result.financial_ratios.profitability_ratios else None,
+                'Return_On_Assets': result.financial_ratios.profitability_ratios.return_on_assets if result.financial_ratios.profitability_ratios else None,
+                'Return_On_Equity': result.financial_ratios.profitability_ratios.return_on_equity if result.financial_ratios.profitability_ratios else None,
                 # Leverage ratios
-                'Debt_To_Equity': result.financial_ratios.leverage_ratios.debt_to_equity,
-                'Debt_To_Assets': result.financial_ratios.leverage_ratios.debt_to_assets,
-                'Interest_Coverage': result.financial_ratios.leverage_ratios.interest_coverage,
+                'Debt_To_Equity': result.financial_ratios.leverage_ratios.debt_to_equity if result.financial_ratios.leverage_ratios else None,
+                'Debt_To_Assets': result.financial_ratios.leverage_ratios.debt_to_assets if result.financial_ratios.leverage_ratios else None,
+                'Interest_Coverage': result.financial_ratios.leverage_ratios.interest_coverage if result.financial_ratios.leverage_ratios else None,
                 # Efficiency ratios
-                'Asset_Turnover': result.financial_ratios.efficiency_ratios.asset_turnover,
-                'Inventory_Turnover': result.financial_ratios.efficiency_ratios.inventory_turnover,
-                'Receivables_Turnover': result.financial_ratios.efficiency_ratios.receivables_turnover
+                'Asset_Turnover': result.financial_ratios.efficiency_ratios.asset_turnover if result.financial_ratios.efficiency_ratios else None,
+                'Inventory_Turnover': result.financial_ratios.efficiency_ratios.inventory_turnover if result.financial_ratios.efficiency_ratios else None,
+                'Receivables_Turnover': result.financial_ratios.efficiency_ratios.receivables_turnover if result.financial_ratios.efficiency_ratios else None
             })
         return ratios_data
     
@@ -568,3 +664,37 @@ class ExportService:
                 'Key_Themes': {'type': 'string', 'description': 'Key themes identified in news articles'}
             }
         }
+
+    def _create_etf_data(self, data: List[AnalysisResult]) -> List[Dict]:
+        """Create ETF-specific data for analysis.
+        
+        Args:
+            data: List of analysis results.
+            
+        Returns:
+            List[Dict]: ETF data records.
+        """
+        etf_data = []
+        for result in data:
+            # Only include ETFs
+            if not isinstance(result.stock_info, ETFInfo):
+                continue
+                
+            etf_info = result.stock_info
+            etf_data.append({
+                'Symbol': result.symbol,
+                'Timestamp': result.timestamp.isoformat(),
+                'Name': etf_info.name,
+                'Current_Price': etf_info.current_price,
+                'Market_Cap': etf_info.market_cap,
+                'Beta': etf_info.beta,
+                'Expense_Ratio': etf_info.expense_ratio,
+                'Assets_Under_Management': etf_info.assets_under_management,
+                'NAV': etf_info.nav,
+                'Category': etf_info.category,
+                'Asset_Allocation': json.dumps(etf_info.asset_allocation) if etf_info.asset_allocation else None,
+                'Holdings_Count': len(etf_info.holdings) if etf_info.holdings else 0,
+                'Top_Holdings': json.dumps(etf_info.holdings[:10]) if etf_info.holdings else None,
+                'Dividend_Yield': etf_info.dividend_yield
+            })
+        return etf_data

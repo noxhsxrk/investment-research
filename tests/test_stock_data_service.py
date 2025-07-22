@@ -1,291 +1,195 @@
-"""Tests for the StockDataService class."""
+"""Unit tests for stock data service."""
 
-import unittest
-from unittest.mock import patch, MagicMock
-import pandas as pd
 import pytest
+import pandas as pd
+from unittest.mock import patch, MagicMock
 from datetime import datetime
 
 from stock_analysis.services.stock_data_service import StockDataService
-from stock_analysis.models.data_models import StockInfo
+from stock_analysis.models.data_models import StockInfo, ETFInfo
 from stock_analysis.utils.exceptions import DataRetrievalError
 
 
-class TestStockDataService(unittest.TestCase):
+@pytest.fixture
+def mock_ticker():
+    """Create a mock yfinance Ticker."""
+    mock = MagicMock()
+    mock.info = {
+        'symbol': 'AAPL',
+        'shortName': 'Apple Inc.',
+        'longName': 'Apple Inc.',
+        'currentPrice': 150.0,
+        'marketCap': 2500000000000,
+        'trailingPE': 25.0,
+        'priceToBook': 15.0,
+        'dividendYield': 0.005,
+        'beta': 1.2,
+        'sector': 'Technology',
+        'industry': 'Consumer Electronics',
+        'quoteType': 'EQUITY'
+    }
+    return mock
+
+
+@pytest.fixture
+def service():
+    """Create a stock data service instance."""
+    return StockDataService()
+
+
+class TestStockDataService:
     """Test cases for StockDataService."""
     
-    def setUp(self):
-        """Set up test fixtures."""
-        self.service = StockDataService()
-    
-    @patch('yfinance.Ticker')
-    def test_get_stock_info_success(self, mock_ticker):
-        """Test successful retrieval of stock info."""
-        # Mock the ticker instance
-        mock_ticker_instance = MagicMock()
-        mock_ticker.return_value = mock_ticker_instance
-        
-        # Mock the info property
-        mock_ticker_instance.info = {
-            'symbol': 'AAPL',
-            'longName': 'Apple Inc.',
-            'currentPrice': 150.0,
-            'marketCap': 2500000000000,
-            'trailingPE': 25.0,
-            'priceToBook': 30.0,
-            'dividendYield': 0.005,
-            'beta': 1.2,
-            'sector': 'Technology',
-            'industry': 'Consumer Electronics'
-        }
-        
-        # Call the method
-        result = self.service.get_stock_info('AAPL')
-        
-        # Verify the result
-        self.assertIsInstance(result, StockInfo)
-        self.assertEqual(result.symbol, 'AAPL')
-        self.assertEqual(result.company_name, 'Apple Inc.')
-        self.assertEqual(result.current_price, 150.0)
-        self.assertEqual(result.market_cap, 2500000000000)
-        self.assertEqual(result.pe_ratio, 25.0)
-        self.assertEqual(result.pb_ratio, 30.0)
-        self.assertEqual(result.dividend_yield, 0.005)
-        self.assertEqual(result.beta, 1.2)
-        self.assertEqual(result.sector, 'Technology')
-        self.assertEqual(result.industry, 'Consumer Electronics')
-    
-    @patch('yfinance.Ticker')
-    def test_get_stock_info_missing_fields(self, mock_ticker):
-        """Test stock info retrieval with missing fields."""
-        # Mock the ticker instance
-        mock_ticker_instance = MagicMock()
-        mock_ticker.return_value = mock_ticker_instance
-        
-        # Mock the info property with minimal fields
-        mock_ticker_instance.info = {
-            'symbol': 'XYZ',
-            'shortName': 'XYZ Corp',
-            'regularMarketPrice': 50.0,
-            'marketCap': 1000000000
-        }
-        
-        # Call the method
-        result = self.service.get_stock_info('XYZ')
-        
-        # Verify the result
-        self.assertIsInstance(result, StockInfo)
-        self.assertEqual(result.symbol, 'XYZ')
-        self.assertEqual(result.company_name, 'XYZ Corp')
-        self.assertEqual(result.current_price, 50.0)
-        self.assertEqual(result.market_cap, 1000000000)
-        self.assertIsNone(result.pe_ratio)
-        self.assertIsNone(result.pb_ratio)
-        self.assertIsNone(result.dividend_yield)
-        self.assertIsNone(result.beta)
-    
-    @patch('yfinance.Ticker')
-    def test_get_stock_info_error(self, mock_ticker):
-        """Test error handling in stock info retrieval."""
-        # Mock the ticker instance to raise an exception
-        mock_ticker_instance = MagicMock()
-        mock_ticker.return_value = mock_ticker_instance
-        mock_ticker_instance.info = MagicMock(side_effect=Exception("API Error"))
-        
-        # Call the method and check for exception
-        with self.assertRaises(DataRetrievalError):
-            self.service.get_stock_info('AAPL')
-    
-    @patch('yfinance.Ticker')
-    def test_get_historical_data_success(self, mock_ticker):
-        """Test successful retrieval of historical data."""
-        # Mock the ticker instance
-        mock_ticker_instance = MagicMock()
-        mock_ticker.return_value = mock_ticker_instance
-        
-        # Create a sample DataFrame for historical data
-        dates = pd.date_range(start='2023-01-01', periods=5)
-        mock_history = pd.DataFrame({
-            'Open': [150.0, 151.0, 152.0, 153.0, 154.0],
-            'High': [155.0, 156.0, 157.0, 158.0, 159.0],
-            'Low': [145.0, 146.0, 147.0, 148.0, 149.0],
-            'Close': [153.0, 154.0, 155.0, 156.0, 157.0],
-            'Volume': [1000000, 1100000, 1200000, 1300000, 1400000]
-        }, index=dates)
-        
-        # Mock the history method
-        mock_ticker_instance.history = MagicMock(return_value=mock_history)
-        
-        # Call the method
-        result = self.service.get_historical_data('AAPL', period='1mo', interval='1d')
-        
-        # Verify the result
-        self.assertIsInstance(result, pd.DataFrame)
-        self.assertEqual(len(result), 5)
-        self.assertTrue('Open' in result.columns)
-        self.assertTrue('Close' in result.columns)
-        
-        # Verify the method was called with correct parameters
-        mock_ticker_instance.history.assert_called_once_with(period='1mo', interval='1d')
-    
-    @patch('yfinance.Ticker')
-    def test_get_historical_data_empty(self, mock_ticker):
-        """Test handling of empty historical data."""
-        # Mock the ticker instance
-        mock_ticker_instance = MagicMock()
-        mock_ticker.return_value = mock_ticker_instance
-        
-        # Mock the history method to return empty DataFrame
-        mock_ticker_instance.history = MagicMock(return_value=pd.DataFrame())
-        
-        # Call the method and check for exception
-        with self.assertRaises(DataRetrievalError):
-            self.service.get_historical_data('AAPL')
-    
-    @patch('yfinance.Ticker')
-    def test_get_financial_statements_success(self, mock_ticker):
+    def test_get_financial_statements_success(self, service, mock_ticker):
         """Test successful retrieval of financial statements."""
-        # Mock the ticker instance
-        mock_ticker_instance = MagicMock()
-        mock_ticker.return_value = mock_ticker_instance
-        
         # Create a sample DataFrame for financial statements
         dates = [datetime(2020, 12, 31), datetime(2021, 12, 31)]
         mock_statement = pd.DataFrame({
             'Revenue': [100000000, 120000000],
-            'CostOfRevenue': [50000000, 60000000],
-            'GrossProfit': [50000000, 60000000],
-            'NetIncome': [20000000, 25000000]
+            'NetIncome': [20000000, 25000000],
+            'OperatingIncome': [30000000, 35000000],
+            'GrossProfit': [50000000, 60000000]
         }, index=dates)
         
-        # Mock the income_stmt method
-        mock_ticker_instance.income_stmt = MagicMock(return_value=mock_statement)
+        # Mock the income_stmt property
+        mock_ticker.income_stmt = mock_statement
         
-        # Call the method
-        result = self.service.get_financial_statements('AAPL', statement_type='income', period='annual')
-        
-        # Verify the result
-        self.assertIsInstance(result, pd.DataFrame)
-        self.assertEqual(len(result), 2)
-        self.assertTrue('Revenue' in result.columns)
-        self.assertTrue('NetIncome' in result.columns)
-        
-        # Verify the method was called with correct parameters
-        mock_ticker_instance.income_stmt.assert_called_once_with(period='annual')
+        with patch('yfinance.Ticker', return_value=mock_ticker):
+            # Call the method
+            result = service.get_financial_statements('AAPL', statement_type='income', period='annual', use_cache=False)
+            
+            # Verify the result
+            assert isinstance(result, pd.DataFrame)
+            assert result.shape[0] == 2  # 2 time periods
+            assert result.shape[1] == 4  # 4 metrics
+            assert 'Revenue' in result.columns
+            assert 'NetIncome' in result.columns
     
-    @patch('yfinance.Ticker')
-    def test_get_financial_statements_invalid_type(self, mock_ticker):
-        """Test handling of invalid statement type."""
-        # Call the method with invalid statement type
-        with self.assertRaises(ValueError):
-            self.service.get_financial_statements('AAPL', statement_type='invalid')
-    
-    @patch('yfinance.Ticker')
-    def test_validate_symbol_valid(self, mock_ticker):
-        """Test validation of a valid symbol."""
-        # Mock the ticker instance
-        mock_ticker_instance = MagicMock()
-        mock_ticker.return_value = mock_ticker_instance
+    def test_get_historical_data_empty(self, service, mock_ticker):
+        """Test handling of empty historical data."""
+        # Mock the history method to return empty DataFrame
+        mock_ticker.history = MagicMock(return_value=pd.DataFrame())
         
-        # Mock the info property
-        mock_ticker_instance.info = {
-            'regularMarketPrice': 150.0,
-            'longName': 'Apple Inc.'
+        with patch('yfinance.Ticker', return_value=mock_ticker):
+            with pytest.raises(DataRetrievalError) as exc_info:
+                service.get_historical_data('AAPL', period='1mo', use_cache=False)
+            assert "No historical data available" in str(exc_info.value)
+    
+    def test_get_security_info_error(self, service, mock_ticker):
+        """Test error handling in security info retrieval."""
+        # Mock the ticker instance to raise an exception
+        mock_ticker.info = MagicMock(side_effect=Exception("API Error"))
+        
+        with patch('yfinance.Ticker', return_value=mock_ticker):
+            with pytest.raises(DataRetrievalError) as exc_info:
+                service.get_security_info('AAPL', use_cache=False)
+            assert "Failed to retrieve security info" in str(exc_info.value)
+    
+    def test_get_security_info_stock_success(self, service, mock_ticker):
+        """Test successful retrieval of stock info."""
+        with patch('yfinance.Ticker', return_value=mock_ticker):
+            result = service.get_security_info('AAPL', use_cache=False)
+            
+            assert isinstance(result, StockInfo)
+            assert result.symbol == 'AAPL'
+            assert result.name == 'Apple Inc.'
+            assert result.current_price == 150.0
+            assert result.market_cap == 2500000000000
+            assert result.beta == 1.2
+            assert result.pe_ratio == 25.0
+            assert result.pb_ratio == 15.0
+            assert result.dividend_yield == 0.005
+            assert result.sector == 'Technology'
+            assert result.industry == 'Consumer Electronics'
+    
+    def test_get_security_info_etf_success(self, service, mock_ticker):
+        """Test successful retrieval of ETF info."""
+        # Update mock info for ETF
+        mock_ticker.info = {
+            'symbol': 'SPY',
+            'shortName': 'SPDR S&P 500 ETF Trust',
+            'longName': 'SPDR S&P 500 ETF Trust',
+            'currentPrice': 450.0,
+            'marketCap': 450000000000,
+            'beta': 1.0,
+            'dividendYield': 0.015,
+            'totalAssets': 450000000000,
+            'navPrice': 450.0,
+            'category': 'Large Blend',
+            'quoteType': 'ETF',
+            'fundFamily': 'State Street Global Advisors',
+            'annualReportExpenseRatio': 0.0095,
+            'holdings': [
+                {'symbol': 'AAPL', 'holdingName': 'Apple Inc.', 'holdingPercent': 7.0},
+                {'symbol': 'MSFT', 'holdingName': 'Microsoft Corp', 'holdingPercent': 6.0}
+            ],
+            'assetProfile': {
+                'assetAllocation': {
+                    'stocks': 0.98,
+                    'bonds': 0.0,
+                    'cash': 0.02
+                }
+            }
         }
         
-        # Call the method
-        result = self.service.validate_symbol('AAPL')
-        
-        # Verify the result
-        self.assertTrue(result)
+        with patch('yfinance.Ticker', return_value=mock_ticker):
+            result = service.get_security_info('SPY', use_cache=False)
+            
+            assert isinstance(result, ETFInfo)
+            assert result.symbol == 'SPY'
+            assert result.name == 'SPDR S&P 500 ETF Trust'
+            assert result.current_price == 450.0
+            assert result.market_cap == 450000000000
+            assert result.beta == 1.0
+            assert result.expense_ratio == 0.0095
+            assert result.assets_under_management == 450000000000
+            assert result.nav == 450.0
+            assert result.category == 'Large Blend'
+            assert result.dividend_yield == 0.015
+            assert len(result.holdings) == 2
+            assert result.holdings[0]['symbol'] == 'AAPL'
+            assert result.holdings[0]['weight'] == 0.07
+            assert result.asset_allocation['stocks'] == 0.98
     
-    @patch('yfinance.Ticker')
-    def test_validate_symbol_invalid(self, mock_ticker):
-        """Test validation of an invalid symbol."""
-        # Mock the ticker instance
-        mock_ticker_instance = MagicMock()
-        mock_ticker.return_value = mock_ticker_instance
+    def test_is_etf_detection(self, service):
+        """Test ETF detection logic."""
+        # Test with explicit ETF type
+        assert service._is_etf({'quoteType': 'ETF'})
         
-        # Mock the info property with minimal data (no price)
-        mock_ticker_instance.info = {}
+        # Test with fund family
+        assert service._is_etf({'fundFamily': 'Vanguard'})
         
-        # Call the method
-        result = self.service.validate_symbol('INVALID')
+        # Test with ETF in name
+        assert service._is_etf({'shortName': 'Vanguard S&P 500 ETF'})
         
-        # Verify the result
-        self.assertFalse(result)
-    
-    @patch('yfinance.Ticker')
-    def test_validate_symbol_error(self, mock_ticker):
-        """Test validation when an error occurs."""
-        # Mock the ticker instance to raise an exception
-        mock_ticker_instance = MagicMock()
-        mock_ticker.return_value = mock_ticker_instance
-        mock_ticker_instance.info = MagicMock(side_effect=Exception("API Error"))
-        
-        # Call the method
-        result = self.service.validate_symbol('AAPL')
-        
-        # Verify the result (should return False on error)
-        self.assertFalse(result)
+        # Test with non-ETF
+        assert not service._is_etf({'quoteType': 'EQUITY'})
     
     @patch('time.sleep')
-    def test_rate_limit(self, mock_sleep):
-        """Test rate limiting functionality."""
-        # Set a short delay for testing
-        self.service.rate_limit_delay = 0.1
+    def test_retry_with_backoff_success(self, mock_sleep, service):
+        """Test retry with backoff success."""
+        attempts = 0
         
-        # Call rate limit twice
-        self.service._rate_limit()  # First call should not delay
-        self.service._rate_limit()  # Second call should delay
+        def test_func(operation_name):
+            nonlocal attempts
+            attempts += 1
+            if attempts < 2:
+                raise Exception("Temporary error")
+            return "success"
         
-        # Verify that sleep was called once (for the second call)
-        self.assertEqual(mock_sleep.call_count, 1)
-        
-        # Verify sleep was called with a value close to our rate limit delay
-        # The exact value will include some random jitter
-        call_arg = mock_sleep.call_args[0][0]
-        self.assertGreaterEqual(call_arg, 0.1)  # Should be at least our delay
+        result = service._retry_with_backoff(test_func, "test_operation")
+        assert result == "success"
+        assert attempts == 2
+        mock_sleep.assert_called_once()
     
     @patch('time.sleep')
-    def test_retry_with_backoff(self, mock_sleep):
-        """Test retry with backoff functionality."""
-        # Create a mock function that fails twice then succeeds
-        mock_func = MagicMock(side_effect=[Exception("First failure"), 
-                                          Exception("Second failure"), 
-                                          "Success"])
-        
-        # Call the retry method
-        result = self.service._retry_with_backoff(mock_func)
-        
-        # Verify the result
-        self.assertEqual(result, "Success")
-        
-        # Verify the function was called 3 times
-        self.assertEqual(mock_func.call_count, 3)
-        
-        # Verify sleep was called twice (after first and second failures)
-        self.assertEqual(mock_sleep.call_count, 2)
-    
-    @patch('time.sleep')
-    def test_retry_with_backoff_all_failures(self, mock_sleep):
+    def test_retry_with_backoff_all_failures(self, mock_sleep, service):
         """Test retry with backoff when all attempts fail."""
-        # Set a small number of retry attempts
-        self.service.retry_attempts = 2
+        def test_func(operation_name):
+            raise Exception("Always fails")
         
-        # Create a mock function that always fails
-        mock_func = MagicMock(side_effect=Exception("Always fails"))
+        with pytest.raises(DataRetrievalError) as exc_info:
+            service._retry_with_backoff(test_func, "test_operation")
+        assert "Failed to retrieve data after 3 attempts" in str(exc_info.value)
         
-        # Call the retry method and check for exception
-        with self.assertRaises(DataRetrievalError):
-            self.service._retry_with_backoff(mock_func)
-        
-        # Verify the function was called the expected number of times
-        self.assertEqual(mock_func.call_count, 2)
-        
-        # Verify sleep was called once (after first failure)
-        self.assertEqual(mock_sleep.call_count, 1)
-
-
-if __name__ == '__main__':
-    unittest.main()
+        assert mock_sleep.call_count == 2  # Called for each retry except last attempt

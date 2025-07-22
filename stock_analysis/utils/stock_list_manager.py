@@ -23,6 +23,19 @@ logger = get_logger(__name__)
 class StockListManager:
     """Manages stock lists from various sources."""
     
+    _instance = None
+    
+    @classmethod
+    def get_instance(cls) -> 'StockListManager':
+        """Get the global StockListManager instance.
+        
+        Returns:
+            StockListManager instance
+        """
+        if cls._instance is None:
+            cls._instance = StockListManager()
+        return cls._instance
+    
     def __init__(self, stock_data_service: Optional[StockDataService] = None):
         """Initialize the stock list manager.
         
@@ -456,7 +469,3 @@ class StockListManager:
             self._save_classification_cache()
             
         return result
-
-
-# Global stock list manager instance
-stock_list_manager = StockListManager()
