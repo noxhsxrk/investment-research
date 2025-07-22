@@ -1,0 +1,16 @@
+# Example stock symbols for batch analysis
+# Technology stocks
+AAPL
+MSFT
+GOOGL
+AMZN
+
+# Financial stocks  
+JPM
+BAC
+WFC
+
+# Healthcare stocks
+JNJ
+PFE
+UNH

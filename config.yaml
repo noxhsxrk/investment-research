@@ -1,0 +1,57 @@
+stock_analysis:
+  data_sources:
+    yfinance:
+      timeout: 30
+      retry_attempts: 3
+      rate_limit_delay: 1.0
+    
+  analysis:
+    default_period: "1y"
+    valuation_models: 
+      - "dcf"
+      - "peer_comparison" 
+      - "peg"
+    sentiment_sources:
+      - "yahoo_news"
+      - "google_news"
+    
+  export:
+    default_format: "excel"
+    output_directory: "./exports"
+    include_charts: true
+    
+  scheduling:
+    default_interval: "daily"
+    notification_email: null
+    
+  notifications:
+    enabled: true
+    email_host: null
+    email_port: 587
+    email_username: null
+    email_password: null
+    email_use_tls: true
+    recipients: []
+    send_on_success: true
+    send_on_failure: true
+    send_summary_reports: true
+    
+  logging:
+    level: "INFO"
+    file_path: "./logs/stock_analysis.log"
+    max_file_size: "10MB"
+    backup_count: 5
+    
+  cache:
+    use_disk_cache: true
+    directory: "./.cache"
+    max_memory_size: 104857600  # 100MB
+    max_disk_size: 1073741824   # 1GB
+    cleanup_interval: 3600      # 1 hour
+    expiry:
+      stock_info: 3600          # 1 hour
+      historical_data: 86400    # 24 hours
+      financial_statements: 604800  # 1 week
+      news: 1800                # 30 minutes
+      peer_data: 604800         # 1 week
+      general: 3600             # 1 hour

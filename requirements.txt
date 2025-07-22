@@ -1,0 +1,43 @@
+# Core dependencies
+yfinance>=0.2.18
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
+
+# Configuration and data handling
+PyYAML>=6.0
+python-dateutil>=2.8.2
+
+# Natural language processing for sentiment analysis
+nltk>=3.8.1
+textblob>=0.17.1
+vaderSentiment>=3.3.2
+
+# Export formats
+openpyxl>=3.1.0
+xlsxwriter>=3.1.0
+
+# Web scraping for news (optional)
+beautifulsoup4>=4.12.0
+newspaper3k>=0.2.8
+
+# Scheduling
+schedule>=1.2.0
+APScheduler>=3.10.0
+
+# Performance monitoring
+psutil>=5.9.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.0
+
+# Development tools
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.5.0
+
+# Optional: For advanced financial calculations
+scipy>=1.11.0
+scikit-learn>=1.3.0
