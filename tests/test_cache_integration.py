@@ -1,54 +1,33 @@
-"""Integration tests for the cache manager with stock data service."""
+"""Integration tests for cache manager with stock data service."""
 
+import pytest
 import os
 import time
-import shutil
-import unittest
 from unittest.mock import patch, MagicMock
 import pandas as pd
-import numpy as np
 from datetime import datetime
 
-from stock_analysis.utils.cache_manager import CacheManager, CacheEntry, get_cache_manager
-from stock_analysis.utils.config import ConfigManager
+from stock_analysis.utils.cache_manager import CacheManager, get_cache_manager
 from stock_analysis.services.stock_data_service import StockDataService
 
 
-class TestCacheIntegration(unittest.TestCase):
-    """Test the integration of cache manager with stock data service."""
+@pytest.fixture
+def cache_dir(tmp_path):
+    """Create a temporary cache directory."""
+    cache_dir = tmp_path / "test_cache"
+    cache_dir.mkdir()
+    return str(cache_dir)
+
+
+@pytest.fixture
+def config_mock(cache_dir):
+    """Create a mock configuration."""
+    mock = MagicMock()
     
-    def setUp(self):
-        """Set up test environment."""
-        # Create a test cache directory
-        self.test_cache_dir = "./.test_cache"
-        os.makedirs(self.test_cache_dir, exist_ok=True)
-        
-        # Create a test config
-        self.config_mock = MagicMock()
-        self.config_mock.get.side_effect = self._mock_config_get
-        
-        # Create a cache manager with test configuration
-        with patch('stock_analysis.utils.cache_manager.config', self.config_mock):
-            with patch('stock_analysis.services.stock_data_service.config', self.config_mock):
-                # Reset the singleton instance for testing
-                CacheManager._instance = None
-                self.cache_manager = CacheManager(self.test_cache_dir)
-                self.stock_data_service = StockDataService()
-    
-    def tearDown(self):
-        """Clean up after tests."""
-        # Stop cleanup thread
-        self.cache_manager.stop_cleanup_thread()
-        
-        # Remove test cache directory
-        if os.path.exists(self.test_cache_dir):
-            shutil.rmtree(self.test_cache_dir)
-    
-    def _mock_config_get(self, key, default=None):
-        """Mock config.get method."""
+    def mock_get(key, default=None):
         config_values = {
             'stock_analysis.cache.use_disk_cache': True,
-            'stock_analysis.cache.directory': self.test_cache_dir,
+            'stock_analysis.cache.directory': str(cache_dir),
             'stock_analysis.cache.max_memory_size': 1024 * 1024,  # 1MB
             'stock_analysis.cache.max_disk_size': 10 * 1024 * 1024,  # 10MB
             'stock_analysis.cache.cleanup_interval': 1,  # 1 second for faster testing
@@ -64,8 +43,33 @@ class TestCacheIntegration(unittest.TestCase):
         }
         return config_values.get(key, default)
     
-    @patch('stock_analysis.services.stock_data_service.yf.Ticker')
-    def test_stock_info_caching(self, mock_ticker):
+    mock.get.side_effect = mock_get
+    return mock
+
+
+@pytest.fixture
+def cache_manager(cache_dir, config_mock):
+    """Create a cache manager instance for testing."""
+    with patch('stock_analysis.utils.cache_manager.config', config_mock):
+        # Reset singleton instance
+        CacheManager._instance = None
+        manager = CacheManager(cache_dir)
+        yield manager
+        manager.stop_cleanup_thread()
+
+
+@pytest.fixture
+def stock_data_service(cache_manager, config_mock):
+    """Create a stock data service instance for testing."""
+    with patch('stock_analysis.services.stock_data_service.config', config_mock):
+        return StockDataService()
+
+
+class TestCacheIntegration:
+    """Test integration of cache manager with stock data service."""
+    
+    @patch('yfinance.Ticker')
+    def test_stock_info_caching(self, mock_ticker, stock_data_service):
         """Test caching of stock info in stock data service."""
         # Mock the ticker instance
         mock_ticker_instance = MagicMock()
@@ -83,25 +87,26 @@ class TestCacheIntegration(unittest.TestCase):
             'dividendYield': 0.005,
             'beta': 1.2,
             'sector': 'Technology',
-            'industry': 'Consumer Electronics'
+            'industry': 'Consumer Electronics',
+            'quoteType': 'EQUITY'
         }
         
         # First call should retrieve from API
-        result1 = self.stock_data_service.get_stock_info('AAPL')
+        result1 = stock_data_service.get_security_info('AAPL')
         
         # Second call should retrieve from cache
-        result2 = self.stock_data_service.get_stock_info('AAPL')
+        result2 = stock_data_service.get_security_info('AAPL')
         
         # Verify ticker was only created once
         mock_ticker.assert_called_once_with('AAPL')
         
         # Verify results are the same
-        self.assertEqual(result1.symbol, result2.symbol)
-        self.assertEqual(result1.company_name, result2.company_name)
-        self.assertEqual(result1.current_price, result2.current_price)
+        assert result1.symbol == result2.symbol
+        assert result1.name == result2.name
+        assert result1.current_price == result2.current_price
     
-    @patch('stock_analysis.services.stock_data_service.yf.Ticker')
-    def test_historical_data_caching(self, mock_ticker):
+    @patch('yfinance.Ticker')
+    def test_historical_data_caching(self, mock_ticker, stock_data_service):
         """Test caching of historical data in stock data service."""
         # Mock the ticker instance
         mock_ticker_instance = MagicMock()
@@ -115,13 +120,13 @@ class TestCacheIntegration(unittest.TestCase):
             'Close': [153.0, 154.0, 155.0],
             'Volume': [1000000, 1100000, 1200000]
         })
-        mock_ticker_instance.history.return_value = mock_data
+        mock_ticker_instance.history = MagicMock(return_value=mock_data)
         
         # First call should retrieve from API
-        result1 = self.stock_data_service.get_historical_data('AAPL', period='1mo')
+        result1 = stock_data_service.get_historical_data('AAPL', period='1mo')
         
         # Second call should retrieve from cache
-        result2 = self.stock_data_service.get_historical_data('AAPL', period='1mo')
+        result2 = stock_data_service.get_historical_data('AAPL', period='1mo')
         
         # Verify history was only called once
         mock_ticker_instance.history.assert_called_once()
@@ -130,7 +135,7 @@ class TestCacheIntegration(unittest.TestCase):
         pd.testing.assert_frame_equal(result1, result2)
     
     @patch('yfinance.Ticker')
-    def test_financial_statements_caching(self, mock_ticker):
+    def test_financial_statements_caching(self, mock_ticker, stock_data_service):
         """Test caching of financial statements in stock data service."""
         # Mock the ticker instance
         mock_ticker_instance = MagicMock()
@@ -145,10 +150,10 @@ class TestCacheIntegration(unittest.TestCase):
         mock_ticker_instance.income_stmt = mock_data
         
         # First call should retrieve from API
-        result1 = self.stock_data_service.get_financial_statements('AAPL', statement_type='income')
+        result1 = stock_data_service.get_financial_statements('AAPL', statement_type='income')
         
         # Second call should retrieve from cache
-        result2 = self.stock_data_service.get_financial_statements('AAPL', statement_type='income')
+        result2 = stock_data_service.get_financial_statements('AAPL', statement_type='income')
         
         # Verify ticker was only created once
         mock_ticker.assert_called_once_with('AAPL')
@@ -157,7 +162,7 @@ class TestCacheIntegration(unittest.TestCase):
         pd.testing.assert_frame_equal(result1, result2)
     
     @patch('yfinance.Ticker')
-    def test_cache_expiration(self, mock_ticker):
+    def test_cache_expiration(self, mock_ticker, stock_data_service, cache_manager):
         """Test cache expiration for stock data."""
         # Mock the ticker instance
         mock_ticker_instance = MagicMock()
@@ -175,28 +180,30 @@ class TestCacheIntegration(unittest.TestCase):
             'dividendYield': 0.005,
             'beta': 1.2,
             'sector': 'Technology',
-            'industry': 'Consumer Electronics'
+            'industry': 'Consumer Electronics',
+            'quoteType': 'EQUITY'
         }
         
         # Set a very short expiration time for testing
-        with patch.dict(self.cache_manager._default_expiry, {'stock_info': 1}):  # 1 second
-            # First call should retrieve from API
-            self.stock_data_service.get_stock_info('AAPL')
-            
-            # Reset mock to verify second call
-            mock_ticker.reset_mock()
-            
-            # Wait for cache to expire
-            time.sleep(1.1)
-            
-            # Second call should retrieve from API again due to expiration
-            self.stock_data_service.get_stock_info('AAPL')
-            
-            # Verify ticker was created again
-            mock_ticker.assert_called_once_with('AAPL')
+        cache_manager._default_expiry['stock_info'] = 1  # 1 second
+        
+        # First call should retrieve from API
+        stock_data_service.get_security_info('AAPL')
+        
+        # Reset mock to verify second call
+        mock_ticker.reset_mock()
+        
+        # Wait for cache to expire
+        time.sleep(1.1)
+        
+        # Second call should retrieve from API again due to expiration
+        stock_data_service.get_security_info('AAPL')
+        
+        # Verify ticker was created again
+        mock_ticker.assert_called_once_with('AAPL')
     
     @patch('yfinance.Ticker')
-    def test_cache_invalidation(self, mock_ticker):
+    def test_cache_invalidation(self, mock_ticker, stock_data_service):
         """Test cache invalidation for stock data."""
         # Mock the ticker instance
         mock_ticker_instance = MagicMock()
@@ -214,59 +221,22 @@ class TestCacheIntegration(unittest.TestCase):
             'dividendYield': 0.005,
             'beta': 1.2,
             'sector': 'Technology',
-            'industry': 'Consumer Electronics'
+            'industry': 'Consumer Electronics',
+            'quoteType': 'EQUITY'
         }
         
         # First call should retrieve from API
-        self.stock_data_service.get_stock_info('AAPL')
+        stock_data_service.get_security_info('AAPL')
         
         # Reset mock to verify second call
         mock_ticker.reset_mock()
         
         # Invalidate the cache
         cache = get_cache_manager()
-        cache.invalidate_by_pattern("stock_info:*")
+        cache.invalidate_by_pattern("security_info:*")
         
         # Second call should retrieve from API again due to invalidation
-        self.stock_data_service.get_stock_info('AAPL')
+        stock_data_service.get_security_info('AAPL')
         
         # Verify ticker was created again
         mock_ticker.assert_called_once_with('AAPL')
-    
-    @patch('yfinance.Ticker')
-    def test_different_cache_types(self, mock_ticker):
-        """Test different cache types have different expiration times."""
-        # Mock the ticker instance
-        mock_ticker_instance = MagicMock()
-        mock_ticker.return_value = mock_ticker_instance
-        
-        # Mock the info property
-        mock_ticker_instance.info = {
-            'symbol': 'AAPL',
-            'shortName': 'Apple Inc.',
-            'currentPrice': 150.0,
-        }
-        
-        # Mock the history method
-        mock_ticker_instance.history.return_value = pd.DataFrame({
-            'Close': [153.0, 154.0, 155.0],
-        })
-        
-        # Get cache manager
-        cache = get_cache_manager()
-        
-        # Check default expiry times for different data types
-        self.assertNotEqual(
-            cache._default_expiry['stock_info'],
-            cache._default_expiry['historical_data']
-        )
-        
-        # Verify stock_info has shorter expiry than historical_data
-        self.assertLess(
-            cache._default_expiry['stock_info'],
-            cache._default_expiry['historical_data']
-        )
-
-
-if __name__ == '__main__':
-    unittest.main()

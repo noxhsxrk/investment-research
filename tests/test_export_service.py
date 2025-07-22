@@ -15,7 +15,7 @@ from stock_analysis.exporters.export_service import ExportService
 from stock_analysis.models.data_models import (
     AnalysisResult, EfficiencyRatios, FairValueResult, FinancialRatios,
     HealthScore, LeverageRatios, LiquidityRatios, ProfitabilityRatios,
-    SentimentResult, StockInfo
+    SentimentResult, StockInfo, ETFInfo
 )
 from stock_analysis.utils.exceptions import ExportError
 
@@ -34,6 +34,25 @@ def sample_stock_info():
         beta=1.2,
         sector="Technology",
         industry="Consumer Electronics"
+    )
+
+
+@pytest.fixture
+def sample_etf_info():
+    """Create sample ETF info for testing."""
+    return ETFInfo(
+        symbol="SPY",
+        name="SPDR S&P 500 ETF Trust",
+        current_price=450.0,
+        market_cap=450000000000,
+        beta=1.0,
+        expense_ratio=0.0095,
+        assets_under_management=450000000000,
+        nav=450.0,
+        category="Large Blend",
+        asset_allocation={"Stocks": 0.98, "Cash": 0.02},
+        holdings=[("AAPL", 0.07), ("MSFT", 0.06)],
+        dividend_yield=0.015
     )
 
 
@@ -153,7 +172,7 @@ class TestExportService:
             assert len(rows) == 1
             row = rows[0]
             assert row['Symbol'] == 'AAPL'
-            assert row['Company_Name'] == 'Apple Inc.'
+            assert row['Name'] == 'Apple Inc.'
             assert float(row['Current_Price']) == 150.0
             assert row['Valuation_Recommendation'] == 'BUY'
     
@@ -164,7 +183,7 @@ class TestExportService:
         result2 = copy.deepcopy(sample_analysis_result)
         result2.symbol = "MSFT"
         result2.stock_info.symbol = "MSFT"
-        result2.stock_info.company_name = "Microsoft Corporation"
+        result2.stock_info.name = "Microsoft Corporation"
         
         results = [sample_analysis_result, result2]
         filepath = export_service.export_to_csv(results, "test_multiple.csv")
@@ -207,7 +226,7 @@ class TestExportService:
         summary_df = pd.read_excel(filepath, sheet_name='Summary')
         assert len(summary_df) == 1
         assert summary_df.iloc[0]['Symbol'] == 'AAPL'
-        assert summary_df.iloc[0]['Company_Name'] == 'Apple Inc.'
+        assert summary_df.iloc[0]['Name'] == 'Apple Inc.'
     
     def test_export_to_excel_multiple_sheets(self, export_service, sample_analysis_result):
         """Test Excel export creates all expected sheets."""
@@ -215,7 +234,7 @@ class TestExportService:
         
         # Verify all sheets have data
         sheets_to_check = {
-            'Summary': ['Symbol', 'Company_Name', 'Overall_Health_Score'],
+            'Summary': ['Symbol', 'Name', 'Overall_Health_Score'],
             'Stock_Info': ['Symbol', 'Current_Price', 'Market_Cap'],
             'Financial_Ratios': ['Symbol', 'Current_Ratio', 'Gross_Margin'],
             'Health_Scores': ['Symbol', 'Overall_Health_Score', 'Risk_Assessment'],
@@ -284,7 +303,7 @@ class TestExportService:
         
         # Check key fields are present
         assert flattened['Symbol'] == 'AAPL'
-        assert flattened['Company_Name'] == 'Apple Inc.'
+        assert flattened['Name'] == 'Apple Inc.'
         assert flattened['Current_Price'] == 150.0
         assert flattened['Overall_Health_Score'] == 85.0
         assert flattened['Valuation_Recommendation'] == 'BUY'
@@ -302,7 +321,7 @@ class TestExportService:
         summary = summary_data[0]
         
         assert summary['Symbol'] == 'AAPL'
-        assert summary['Company_Name'] == 'Apple Inc.'
+        assert summary['Name'] == 'Apple Inc.'
         assert summary['Overall_Health_Score'] == 85.0
         assert summary['Risk_Assessment'] == 'Low'
         assert summary['Valuation_Recommendation'] == 'BUY'
@@ -389,7 +408,7 @@ class TestExportService:
     def test_export_error_handling(self, export_service):
         """Test error handling in export methods."""
         # Test with invalid data
-        with pytest.raises(ExportError):
+        with pytest.raises(ExportError, match="No data provided for export"):
             export_service.export_to_csv(None)
     
     @patch('stock_analysis.exporters.export_service.open')
@@ -397,27 +416,272 @@ class TestExportService:
         """Test CSV export handles file errors."""
         mock_open.side_effect = IOError("Permission denied")
         
-        with pytest.raises(ExportError) as exc_info:
+        with pytest.raises(ExportError, match="Failed to export to CSV"):
             export_service.export_to_csv(sample_analysis_result, "test.csv")
-        
-        assert "Failed to export to CSV" in str(exc_info.value)
     
     @patch('pandas.ExcelWriter')
     def test_excel_export_file_error(self, mock_writer, export_service, sample_analysis_result):
         """Test Excel export handles file errors."""
         mock_writer.side_effect = IOError("Permission denied")
         
-        with pytest.raises(ExportError) as exc_info:
+        with pytest.raises(ExportError, match="Failed to export to Excel"):
             export_service.export_to_excel(sample_analysis_result, "test.xlsx")
-        
-        assert "Failed to export to Excel" in str(exc_info.value)
     
     @patch('stock_analysis.exporters.export_service.open')
     def test_json_export_file_error(self, mock_open, export_service, sample_analysis_result):
         """Test JSON export handles file errors."""
         mock_open.side_effect = IOError("Permission denied")
         
-        with pytest.raises(ExportError) as exc_info:
+        with pytest.raises(ExportError, match="Failed to export to Power BI JSON"):
             export_service.export_to_powerbi_json(sample_analysis_result, "test.json")
+    
+    def test_export_to_csv_mixed_results(self, export_service, sample_stock_info, sample_etf_info):
+        """Test CSV export with both stock and ETF results."""
+        # Create stock result
+        stock_result = AnalysisResult(
+            symbol="AAPL",
+            timestamp=datetime(2024, 1, 15, 10, 30, 0),
+            stock_info=sample_stock_info,
+            financial_ratios=FinancialRatios(
+                liquidity_ratios=LiquidityRatios(current_ratio=1.5),
+                profitability_ratios=ProfitabilityRatios(gross_margin=0.4),
+                leverage_ratios=LeverageRatios(debt_to_equity=0.5),
+                efficiency_ratios=EfficiencyRatios(asset_turnover=0.7)
+            ),
+            health_score=HealthScore(
+                overall_score=75.0,
+                financial_strength=80.0,
+                profitability_health=70.0,
+                liquidity_health=65.0,
+                risk_assessment="Low"
+            ),
+            fair_value=FairValueResult(
+                current_price=150.0,
+                dcf_value=165.0,
+                average_fair_value=165.0,
+                recommendation="BUY",
+                confidence_level=0.8
+            ),
+            sentiment=SentimentResult(
+                overall_sentiment=0.6,
+                positive_count=15,
+                negative_count=5,
+                neutral_count=10,
+                key_themes=["Earnings", "Product Launch"]
+            ),
+            recommendations=["Strong buy based on fundamentals"]
+        )
         
-        assert "Failed to export to Power BI JSON" in str(exc_info.value)
+        # Create ETF result
+        etf_result = AnalysisResult(
+            symbol="SPY",
+            timestamp=datetime(2024, 1, 15, 10, 30, 0),
+            stock_info=sample_etf_info,
+            financial_ratios=None,  # ETFs don't have financial ratios
+            health_score=HealthScore(
+                overall_score=85.0,
+                financial_strength=None,  # Not applicable for ETFs
+                profitability_health=None,  # Not applicable for ETFs
+                liquidity_health=90.0,
+                risk_assessment="Low"
+            ),
+            fair_value=FairValueResult(
+                current_price=450.0,
+                dcf_value=None,  # Not applicable for ETFs
+                average_fair_value=455.0,
+                recommendation="BUY",
+                confidence_level=0.9
+            ),
+            sentiment=SentimentResult(
+                overall_sentiment=0.4,
+                positive_count=20,
+                negative_count=5,
+                neutral_count=15,
+                key_themes=["Market Performance", "Fund Flows"]
+            ),
+            recommendations=["Consider buying based on market outlook", "Low expense ratio"]
+        )
+        
+        results = [stock_result, etf_result]
+        filepath = export_service.export_to_csv(results, "test_mixed.csv")
+        
+        assert Path(filepath).exists()
+        
+        # Verify CSV content
+        with open(filepath, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            
+            assert len(rows) == 2
+            
+            # Verify stock row
+            stock_row = next(row for row in rows if row['Symbol'] == 'AAPL')
+            assert stock_row['Security_Type'] == 'Stock'
+            assert float(stock_row['Current_Price']) == 150.0
+            assert float(stock_row['PE_Ratio']) == 25.5
+            assert stock_row['Industry'] == 'Consumer Electronics'
+            
+            # Verify ETF row
+            etf_row = next(row for row in rows if row['Symbol'] == 'SPY')
+            assert etf_row['Security_Type'] == 'ETF'
+            assert float(etf_row['Current_Price']) == 450.0
+            assert float(etf_row['Expense_Ratio']) == 0.0095
+            assert etf_row['Category'] == 'Large Blend'
+            assert etf_row['PE_Ratio'] == ''  # Should be empty for ETF
+    
+    def test_export_to_excel_mixed_results(self, export_service, sample_stock_info, sample_etf_info):
+        """Test Excel export with both stock and ETF results."""
+        # Create stock and ETF results (reuse from previous test)
+        stock_result = AnalysisResult(
+            symbol="AAPL",
+            timestamp=datetime(2024, 1, 15, 10, 30, 0),
+            stock_info=sample_stock_info,
+            financial_ratios=FinancialRatios(
+                liquidity_ratios=LiquidityRatios(current_ratio=1.5),
+                profitability_ratios=ProfitabilityRatios(gross_margin=0.4),
+                leverage_ratios=LeverageRatios(debt_to_equity=0.5),
+                efficiency_ratios=EfficiencyRatios(asset_turnover=0.7)
+            ),
+            health_score=HealthScore(
+                overall_score=75.0,
+                financial_strength=80.0,
+                profitability_health=70.0,
+                liquidity_health=65.0,
+                risk_assessment="Low"
+            ),
+            fair_value=FairValueResult(
+                current_price=150.0,
+                dcf_value=165.0,
+                average_fair_value=165.0,
+                recommendation="BUY",
+                confidence_level=0.8
+            ),
+            sentiment=SentimentResult(
+                overall_sentiment=0.6,
+                positive_count=15,
+                negative_count=5,
+                neutral_count=10,
+                key_themes=["Earnings", "Product Launch"]
+            ),
+            recommendations=["Strong buy based on fundamentals"]
+        )
+        
+        etf_result = AnalysisResult(
+            symbol="SPY",
+            timestamp=datetime(2024, 1, 15, 10, 30, 0),
+            stock_info=sample_etf_info,
+            financial_ratios=None,
+            health_score=HealthScore(
+                overall_score=85.0,
+                financial_strength=None,
+                profitability_health=None,
+                liquidity_health=90.0,
+                risk_assessment="Low"
+            ),
+            fair_value=FairValueResult(
+                current_price=450.0,
+                dcf_value=None,
+                average_fair_value=455.0,
+                recommendation="BUY",
+                confidence_level=0.9
+            ),
+            sentiment=SentimentResult(
+                overall_sentiment=0.4,
+                positive_count=20,
+                negative_count=5,
+                neutral_count=15,
+                key_themes=["Market Performance", "Fund Flows"]
+            ),
+            recommendations=["Consider buying based on market outlook", "Low expense ratio"]
+        )
+        
+        results = [stock_result, etf_result]
+        filepath = export_service.export_to_excel(results, "test_mixed.xlsx")
+        
+        assert Path(filepath).exists()
+        
+        # Verify Excel content
+        excel_file = pd.ExcelFile(filepath)
+        expected_sheets = ['Summary', 'Stock_Info', 'ETF_Info', 'Financial_Ratios', 
+                          'Health_Scores', 'Valuation', 'Sentiment', 'Recommendations']
+        
+        assert all(sheet in excel_file.sheet_names for sheet in expected_sheets)
+        
+        # Check summary sheet
+        summary_df = pd.read_excel(filepath, sheet_name='Summary')
+        assert len(summary_df) == 2
+        assert 'Security_Type' in summary_df.columns
+        assert 'Stock' in summary_df['Security_Type'].values
+        assert 'ETF' in summary_df['Security_Type'].values
+        
+        # Check Stock_Info sheet
+        stock_info_df = pd.read_excel(filepath, sheet_name='Stock_Info')
+        assert len(stock_info_df) == 1  # Only one stock
+        assert stock_info_df.iloc[0]['Symbol'] == 'AAPL'
+        
+        # Check ETF_Info sheet
+        etf_info_df = pd.read_excel(filepath, sheet_name='ETF_Info')
+        assert len(etf_info_df) == 1  # Only one ETF
+        assert etf_info_df.iloc[0]['Symbol'] == 'SPY'
+        assert etf_info_df.iloc[0]['Expense_Ratio'] == 0.0095
+    
+    def test_create_etf_data(self, export_service, sample_etf_info):
+        """Test creation of ETF-specific data."""
+        # Create ETF result
+        etf_result = AnalysisResult(
+            symbol="SPY",
+            timestamp=datetime(2024, 1, 15, 10, 30, 0),
+            stock_info=sample_etf_info,
+            financial_ratios=None,
+            health_score=HealthScore(
+                overall_score=85.0,
+                financial_strength=None,
+                profitability_health=None,
+                liquidity_health=90.0,
+                risk_assessment="Low"
+            ),
+            fair_value=FairValueResult(
+                current_price=450.0,
+                dcf_value=None,
+                average_fair_value=455.0,
+                recommendation="BUY",
+                confidence_level=0.9
+            ),
+            sentiment=SentimentResult(
+                overall_sentiment=0.4,
+                positive_count=20,
+                negative_count=5,
+                neutral_count=15,
+                key_themes=["Market Performance", "Fund Flows"]
+            ),
+            recommendations=["Consider buying based on market outlook", "Low expense ratio"]
+        )
+        
+        etf_data = export_service._create_etf_data([etf_result])
+        
+        assert len(etf_data) == 1
+        data = etf_data[0]
+        
+        # Verify ETF-specific fields
+        assert data['Symbol'] == 'SPY'
+        assert data['Name'] == 'SPDR S&P 500 ETF Trust'
+        assert data['Current_Price'] == 450.0
+        assert data['Market_Cap'] == 450000000000
+        assert data['Beta'] == 1.0
+        assert data['Expense_Ratio'] == 0.0095
+        assert data['Assets_Under_Management'] == 450000000000
+        assert data['NAV'] == 450.0
+        assert data['Category'] == 'Large Blend'
+        assert data['Dividend_Yield'] == 0.015
+        
+        # Verify complex fields are properly serialized
+        assert isinstance(data['Asset_Allocation'], str)
+        asset_allocation = json.loads(data['Asset_Allocation'])
+        assert asset_allocation['Stocks'] == 0.98
+        assert asset_allocation['Cash'] == 0.02
+        
+        assert isinstance(data['Top_Holdings'], str)
+        holdings = json.loads(data['Top_Holdings'])
+        assert len(holdings) == 2
+        assert holdings[0] == ['AAPL', 0.07]
+        assert holdings[1] == ['MSFT', 0.06]

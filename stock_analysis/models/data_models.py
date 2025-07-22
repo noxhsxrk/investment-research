@@ -4,7 +4,7 @@ This module contains the core data models used throughout the stock analysis sys
 including validation methods and related utilities.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from typing import Dict, List, Optional, Union
 import re
@@ -13,21 +13,121 @@ from stock_analysis.utils.exceptions import ValidationError
 
 
 @dataclass
-class StockInfo:
+class SecurityInfo:
+    """Base class for security information data models."""
+    symbol: str
+    name: str
+    current_price: float
+    market_cap: Optional[float] = None
+    beta: Optional[float] = None
+    
+    def validate(self) -> None:
+        """Validate the security information data.
+        
+        Raises:
+            ValidationError: If any validation checks fail.
+        """
+        if not self.symbol:
+            raise ValidationError("Security symbol cannot be empty")
+        
+        if not self.name:
+            raise ValidationError("Security name cannot be empty")
+        
+        if not isinstance(self.symbol, str) or not re.match(r'^[A-Z0-9.^-]{1,10}$', self.symbol):
+            raise ValidationError(f"Invalid security symbol format: {self.symbol}")
+        
+        if self.current_price <= 0:
+            raise ValidationError(f"Current price must be positive: {self.current_price}")
+        
+        if self.market_cap is not None and self.market_cap < 0:
+            raise ValidationError(f"Market cap cannot be negative: {self.market_cap}")
+
+
+@dataclass
+class ETFInfo(SecurityInfo):
+    """ETF information data model.
+    
+    Contains ETF-specific information including expense ratio and asset allocation.
+    """
+    expense_ratio: Optional[float] = None
+    assets_under_management: Optional[float] = None
+    nav: Optional[float] = None
+    category: Optional[str] = None
+    asset_allocation: Optional[Dict[str, float]] = None
+    holdings: Optional[List[Dict[str, Union[str, float]]]] = None
+    dividend_yield: Optional[float] = None
+    
+    def validate(self) -> None:
+        """Validate the ETF information data.
+        
+        Raises:
+            ValidationError: If any validation checks fail.
+        """
+        super().validate()
+        
+        if self.expense_ratio is not None and (self.expense_ratio < 0 or self.expense_ratio > 1):
+            raise ValidationError(f"Expense ratio must be between 0 and 1: {self.expense_ratio}")
+        
+        if self.assets_under_management is not None and self.assets_under_management < 0:
+            raise ValidationError(f"Assets under management cannot be negative: {self.assets_under_management}")
+        
+        if self.nav is not None and self.nav <= 0:
+            raise ValidationError(f"NAV must be positive: {self.nav}")
+        
+        if self.dividend_yield is not None and self.dividend_yield < 0:
+            raise ValidationError(f"Dividend yield cannot be negative: {self.dividend_yield}")
+        
+        if self.asset_allocation is not None:
+            total = sum(self.asset_allocation.values())
+            if not (0.99 <= total <= 1.01):  # Allow for small rounding differences
+                raise ValidationError(f"Asset allocation percentages must sum to 1: {total}")
+
+
+@dataclass
+class StockInfo(SecurityInfo):
     """Stock information data model.
     
     Contains basic information about a stock including price, ratios, and market data.
     """
-    symbol: str
-    company_name: str
-    current_price: float
-    market_cap: float
+    company_name: str = field(init=False)  # Will be set in __post_init__
     pe_ratio: Optional[float] = None
     pb_ratio: Optional[float] = None
     dividend_yield: Optional[float] = None
-    beta: Optional[float] = None
     sector: Optional[str] = None
     industry: Optional[str] = None
+    
+    def __init__(self, company_name: str, symbol: str, current_price: float, market_cap: Optional[float] = None,
+                 beta: Optional[float] = None, pe_ratio: Optional[float] = None, pb_ratio: Optional[float] = None,
+                 dividend_yield: Optional[float] = None, sector: Optional[str] = None, industry: Optional[str] = None,
+                 name: Optional[str] = None):
+        """Initialize StockInfo.
+        
+        Args:
+            company_name: Name of the company
+            symbol: Stock ticker symbol
+            current_price: Current stock price
+            market_cap: Market capitalization
+            beta: Beta value
+            pe_ratio: Price to earnings ratio
+            pb_ratio: Price to book ratio
+            dividend_yield: Dividend yield
+            sector: Business sector
+            industry: Industry classification
+            name: Optional override for company name (if not provided, company_name is used)
+        """
+        super().__init__(
+            symbol=symbol,
+            name=name or company_name,  # Use provided name or fall back to company_name
+            current_price=current_price,
+            market_cap=market_cap,
+            beta=beta
+        )
+        self.company_name = company_name
+        self.pe_ratio = pe_ratio
+        self.pb_ratio = pb_ratio
+        self.dividend_yield = dividend_yield
+        self.sector = sector
+        self.industry = industry
     
     def validate(self) -> None:
         """Validate the stock information data.
@@ -35,20 +135,7 @@ class StockInfo:
         Raises:
             ValidationError: If any validation checks fail.
         """
-        if not self.symbol:
-            raise ValidationError("Stock symbol cannot be empty")
-        
-        if not self.company_name:
-            raise ValidationError("Company name cannot be empty")
-        
-        if not isinstance(self.symbol, str) or not re.match(r'^[A-Z0-9.^-]{1,10}$', self.symbol):
-            raise ValidationError(f"Invalid stock symbol format: {self.symbol}")
-        
-        if self.current_price <= 0:
-            raise ValidationError(f"Current price must be positive: {self.current_price}")
-        
-        if self.market_cap <= 0:
-            raise ValidationError(f"Market cap must be positive: {self.market_cap}")
+        super().validate()
         
         if self.pe_ratio is not None and self.pe_ratio < 0:
             raise ValidationError(f"P/E ratio cannot be negative: {self.pe_ratio}")
@@ -327,13 +414,13 @@ class SentimentResult:
 
 @dataclass
 class AnalysisResult:
-    """Complete stock analysis result data model.
+    """Complete analysis result data model.
     
-    Contains all analysis components for a stock.
+    Contains all analysis components for a security (stock or ETF).
     """
     symbol: str
     timestamp: datetime
-    stock_info: StockInfo
+    stock_info: Union[StockInfo, ETFInfo]  # Can be either stock or ETF info
     financial_ratios: FinancialRatios
     health_score: HealthScore
     fair_value: FairValueResult
@@ -347,7 +434,7 @@ class AnalysisResult:
             ValidationError: If any validation checks fail.
         """
         if not self.symbol:
-            raise ValidationError("Stock symbol cannot be empty")
+            raise ValidationError("Symbol cannot be empty")
         
         if not isinstance(self.timestamp, datetime):
             raise ValidationError(f"Timestamp must be a datetime object: {self.timestamp}")
@@ -357,7 +444,11 @@ class AnalysisResult:
         
         # Validate all component models
         self.stock_info.validate()
-        self.financial_ratios.validate()
+        
+        # Only validate financial ratios for stocks
+        if isinstance(self.stock_info, StockInfo):
+            self.financial_ratios.validate()
+        
         self.health_score.validate()
         self.fair_value.validate()
         self.sentiment.validate()
