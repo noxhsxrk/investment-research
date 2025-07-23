@@ -65,7 +65,7 @@ class ExportService:
         # Generate filename if not provided
         if not filename:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"powerbi_data_{timestamp}"
+            filename = f"analyze_data_{timestamp}"
         
         # Ensure the filename has .json extension
         if not filename.endswith(".json"):
@@ -87,11 +87,11 @@ class ExportService:
                     serializable_data.append(item)
             
             # Convert data to Power BI compatible format
-            powerbi_data = self._convert_to_powerbi_format(serializable_data)
+            data = self._convert_to_powerbi_format(serializable_data)
             
             # Write to file
             with open(filepath, 'w') as f:
-                json.dump(powerbi_data, f, indent=2, default=self._json_serializer)
+                json.dump(data, f, indent=2, default=self._json_serializer)
             
             logger.info(f"Successfully exported {len(data)} records to JSON: {filepath}")
             return filepath
