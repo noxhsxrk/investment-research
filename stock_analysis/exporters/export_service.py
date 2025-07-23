@@ -1,7 +1,6 @@
-"""Export service for Power BI integration.
+"""Export service.
 
-This module provides comprehensive export functionality for analysis results
-in formats optimized for Power BI consumption including CSV, Excel, and JSON.
+This module provides comprehensive export functionality for analysis results.
 """
 
 import csv
@@ -21,10 +20,9 @@ logger = get_logger(__name__)
 
 
 class ExportService:
-    """Service for exporting analysis results in Power BI compatible formats.
+    """Service for exporting analysis results.
     
-    Supports CSV, Excel, and JSON exports with proper schemas and metadata
-    for seamless Power BI integration.
+    Supports CSV, Excel, and JSON exports with proper schemas and metadata.
     """
     
     def __init__(self, output_dir: str = "./exports"):
@@ -51,7 +49,7 @@ class ExportService:
         return self.export_to_powerbi_json(data, filename)
     
     def export_to_powerbi_json(self, data: List[Dict[str, Any]], filename: Optional[str] = None) -> str:
-        """Export data to Power BI compatible JSON format.
+        """Export data to JSON format.
         
         Args:
             data: List of dictionaries to export
@@ -95,11 +93,11 @@ class ExportService:
             with open(filepath, 'w') as f:
                 json.dump(powerbi_data, f, indent=2, default=self._json_serializer)
             
-            logger.info(f"Successfully exported {len(data)} records to Power BI JSON: {filepath}")
+            logger.info(f"Successfully exported {len(data)} records to JSON: {filepath}")
             return filepath
             
         except Exception as e:
-            logger.error(f"Error exporting to Power BI JSON: {str(e)}")
+            logger.error(f"Error exporting to JSON: {str(e)}")
             return ""
     
     def _convert_to_powerbi_format(self, data: List[Dict[str, Any]]) -> Dict[str, Any]:

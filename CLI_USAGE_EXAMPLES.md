@@ -247,7 +247,7 @@ JNJ,PFE,UNH
 
 - **CSV**: Flattened data suitable for spreadsheet analysis
 - **Excel**: Multi-sheet workbook with organized data
-- **JSON**: Structured data with metadata for Power BI integration
+- **JSON**: Structured data with metadata for integration
 
 ## Error Handling
 

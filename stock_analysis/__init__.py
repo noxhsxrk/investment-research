@@ -1,6 +1,6 @@
 """
 Stock Analysis Dashboard
-A comprehensive Python-based stock analysis system with Power BI integration.
+A comprehensive Python-based stock analysis system.
 """
 
 __version__ = "1.0.0"

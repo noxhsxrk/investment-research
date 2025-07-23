@@ -12,7 +12,7 @@ setup(
     name="stock-analysis-dashboard",
     version="1.0.0",
     author="Stock Analysis Team",
-    description="A comprehensive Python-based stock analysis system with Power BI integration",
+    description="A comprehensive Python-based stock analysis system",
     long_description=long_description,
     long_description_content_type="text/markdown",
     packages=find_packages(),

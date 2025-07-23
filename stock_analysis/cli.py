@@ -68,7 +68,7 @@ def create_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog='stock-analysis',
-        description='Stock Analysis Dashboard - Comprehensive stock and ETF analysis with Power BI integration',
+        description='Stock Analysis Dashboard - Comprehensive stock and ETF analysis',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

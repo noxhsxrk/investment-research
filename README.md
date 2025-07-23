@@ -1,6 +1,6 @@
 # Stock Analysis Dashboard
 
-A comprehensive Python-based stock analysis system that retrieves financial data from multiple sources including yfinance, Investing.com, and Alpha Vantage. The system integrates with Power BI for visualization and analyzes multiple aspects of stocks including news sentiment, financial metrics, company health indicators, and fair value calculations.
+A comprehensive Python-based stock analysis system that retrieves financial data from multiple sources including yfinance, Investing.com, and Alpha Vantage. 
 
 ## Features
 
@@ -12,7 +12,6 @@ A comprehensive Python-based stock analysis system that retrieves financial data
 - **Financial Analysis**: Calculates key financial ratios and health scores
 - **Valuation Models**: Implements DCF, peer comparison, and PEG ratio models
 - **Sentiment Analysis**: Analyzes news sentiment for market perception insights
-- **Power BI Integration**: Exports data in Power BI compatible formats
 - **Automated Scheduling**: Supports scheduled analysis runs
 - **Comprehensive Logging**: Detailed logging and error handling
 - **Performance Optimization**: Caching, parallel processing, and source prioritization
@@ -73,8 +72,6 @@ stock-analysis news --symbol AAPL --sentiment
 # Run scheduled analysis
 stock-analysis schedule add daily-tech "AAPL,MSFT,GOOGL" --interval daily
 
-# Export results to Power BI format
-stock-analysis export --format powerbi
 ```
 
 ### Python API
