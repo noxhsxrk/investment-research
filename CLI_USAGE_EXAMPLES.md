@@ -1,7 +1,7 @@
-
 # Stock Analysis CLI Usage Examples
 
 ## Single Stock Analysis
+
 ```bash
 # Analyze a single stock with default settings
 stock-analysis analyze AAPL
@@ -11,18 +11,32 @@ stock-analysis analyze AAPL --verbose --export-format json --output my_analysis
 
 # Analyze without exporting results
 stock-analysis analyze AAPL --no-export
+
+# Analyze with technical indicators
+stock-analysis analyze AAPL --include-technicals
+
+# Analyze with analyst recommendations and price targets
+stock-analysis analyze AAPL --include-analyst
+
+# Analyze with both technical indicators and analyst data
+stock-analysis analyze AAPL --include-technicals --include-analyst
 ```
 
 ## Multiple Stock Analysis
+
 ```bash
 # Analyze multiple stocks
 stock-analysis analyze AAPL MSFT GOOGL --verbose
 
 # Analyze with custom export settings
 stock-analysis analyze AAPL MSFT GOOGL --export-format excel --output tech_stocks
+
+# Analyze multiple stocks with enhanced data
+stock-analysis analyze AAPL MSFT GOOGL --include-technicals --include-analyst
 ```
 
 ## Batch Analysis
+
 ```bash
 # Analyze stocks from a file
 stock-analysis batch example_stocks.txt
@@ -34,7 +48,82 @@ stock-analysis batch example_stocks.txt --export-format csv --max-workers 8 --ve
 stock-analysis batch example_stocks.txt --output quarterly_analysis --export-format excel
 ```
 
+## Financial Statements
+
+```bash
+# Get all financial statements (income, balance, cash flow)
+stock-analysis financials AAPL
+
+# Get specific financial statement
+stock-analysis financials AAPL --statement income
+stock-analysis financials AAPL --statement balance
+stock-analysis financials AAPL --statement cash
+
+# Get quarterly financial statements
+stock-analysis financials AAPL --period quarterly
+
+# Get financial statements with growth metrics
+stock-analysis financials AAPL --growth
+
+# Get financial statements with industry comparison
+stock-analysis financials AAPL --compare-industry
+
+# Export financial statements
+stock-analysis financials AAPL --export-format excel --output apple_financials
+```
+
+## Market Data
+
+```bash
+# Get comprehensive market overview
+stock-analysis market
+
+# Get specific market data
+stock-analysis market --indices
+stock-analysis market --sectors
+stock-analysis market --commodities
+stock-analysis market --forex
+stock-analysis market --economic
+
+# Get economic indicators for specific region
+stock-analysis market --economic --region US
+
+# Export market data
+stock-analysis market --indices --sectors --export-format json --output market_overview
+```
+
+## Financial News
+
+```bash
+# Get news for a specific stock
+stock-analysis news --symbol AAPL
+
+# Get general market news
+stock-analysis news --market
+
+# Get news by category
+stock-analysis news --market --category earnings
+stock-analysis news --market --category economy
+stock-analysis news --market --category technology
+
+# Get economic calendar
+stock-analysis news --economic-calendar
+
+# Get news with sentiment analysis
+stock-analysis news --symbol AAPL --sentiment
+
+# Get trending topics
+stock-analysis news --trending
+
+# Control the number of news items
+stock-analysis news --symbol AAPL --limit 20
+
+# Export news data
+stock-analysis news --symbol AAPL --export-format json --output apple_news
+```
+
 ## Scheduling
+
 ```bash
 # Add a daily scheduled job
 stock-analysis schedule add daily-tech "AAPL,MSFT,GOOGL" --interval daily --name "Daily Tech Analysis"
@@ -70,6 +159,7 @@ stock-analysis schedule report --days 30
 ```
 
 ## Configuration Management
+
 ```bash
 # Show all configuration
 stock-analysis config show
@@ -89,6 +179,7 @@ stock-analysis config reset
 ```
 
 ## Global Options
+
 ```bash
 # Use custom configuration file
 stock-analysis --config my_config.yaml analyze AAPL
@@ -103,6 +194,7 @@ stock-analysis --verbose batch example_stocks.txt
 ## File Formats
 
 ### Stock Symbol Files
+
 Text file (one symbol per line):
 ```
 AAPL
@@ -120,12 +212,15 @@ JNJ,PFE,UNH
 ```
 
 ### Export Formats
+
 - **CSV**: Flattened data suitable for spreadsheet analysis
 - **Excel**: Multi-sheet workbook with organized data
 - **JSON**: Structured data with metadata for Power BI integration
 
 ## Error Handling
+
 The CLI includes comprehensive error handling:
+
 - Invalid stock symbols are reported but don't stop batch processing
 - Network timeouts are retried automatically
 - Configuration validation prevents invalid settings

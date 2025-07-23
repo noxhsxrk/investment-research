@@ -112,3 +112,4 @@ exports/
 config_local.yaml
 
 .kiro
+config.yaml

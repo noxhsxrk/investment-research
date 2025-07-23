@@ -135,6 +135,13 @@ class CacheManager:
             self._cleanup_interval = config.get('stock_analysis.cache.cleanup_interval', 3600)  # 1 hour default
             self._running = False
             
+            # Frequency-based caching settings
+            self._hot_cache_size = config.get('stock_analysis.cache.hot_cache_size', 20 * 1024 * 1024)  # 20MB default
+            self._hot_cache_threshold = config.get('stock_analysis.cache.hot_cache_threshold', 5)  # Access count threshold
+            self._hot_cache_ttl_multiplier = config.get('stock_analysis.cache.hot_cache_ttl_multiplier', 2.0)  # Extend TTL for hot items
+            self._access_tracking_window = config.get('stock_analysis.cache.access_tracking_window', 3600)  # 1 hour default
+            self._access_counts: Dict[str, List[float]] = {}  # Key -> list of access timestamps
+            
             # Default expiration times for different data types (in seconds)
             self._default_expiry = {
                 "stock_info": 3600,  # 1 hour
@@ -142,6 +149,9 @@ class CacheManager:
                 "financial_statements": 86400 * 7,  # 1 week
                 "news": 1800,  # 30 minutes
                 "peer_data": 86400 * 7,  # 1 week
+                "market_data": 300,  # 5 minutes
+                "technical_indicators": 1800,  # 30 minutes
+                "economic_data": 3600,  # 1 hour
                 "general": 3600  # 1 hour default
             }
             
@@ -163,6 +173,12 @@ class CacheManager:
             self._max_memory_size = config.get('stock_analysis.cache.max_memory_size', 100 * 1024 * 1024)
             self._max_disk_size = config.get('stock_analysis.cache.max_disk_size', 1024 * 1024 * 1024)
             self._cleanup_interval = config.get('stock_analysis.cache.cleanup_interval', 3600)
+            
+            # Update frequency-based caching settings
+            self._hot_cache_size = config.get('stock_analysis.cache.hot_cache_size', 20 * 1024 * 1024)
+            self._hot_cache_threshold = config.get('stock_analysis.cache.hot_cache_threshold', 5)
+            self._hot_cache_ttl_multiplier = config.get('stock_analysis.cache.hot_cache_ttl_multiplier', 2.0)
+            self._access_tracking_window = config.get('stock_analysis.cache.access_tracking_window', 3600)
             
             # Update expiration times
             for data_type, default_time in self._default_expiry.items():
@@ -195,6 +211,13 @@ class CacheManager:
                 
                 # Update access metadata
                 entry.access()
+                
+                # Track access frequency
+                self._track_access(key)
+                
+                # Check if this is a frequently accessed item and extend TTL if needed
+                self._update_hot_item_ttl(key, entry)
+                
                 return entry.value
             
             # Check disk cache if enabled
@@ -210,6 +233,10 @@ class CacheManager:
                         # Update access metadata and move to memory cache
                         disk_entry.access()
                         self._add_to_memory_cache(disk_entry)
+                        
+                        # Track access frequency
+                        self._track_access(key)
+                        
                         return disk_entry.value
                 except Exception as e:
                     logger.warning(f"Error loading from disk cache: {str(e)}")
@@ -266,6 +293,48 @@ class CacheManager:
         self._memory_cache[entry.key] = entry
         self._current_memory_size += entry.size_bytes
     
+    def _track_access(self, key: str) -> None:
+        """Track access frequency for a cache key.
+        
+        Args:
+            key: Cache key
+        """
+        current_time = time.time()
+        
+        # Initialize access tracking for this key if needed
+        if key not in self._access_counts:
+            self._access_counts[key] = []
+        
+        # Add current access timestamp
+        self._access_counts[key].append(current_time)
+        
+        # Remove old access timestamps outside the tracking window
+        cutoff_time = current_time - self._access_tracking_window
+        self._access_counts[key] = [t for t in self._access_counts[key] if t >= cutoff_time]
+    
+    def _update_hot_item_ttl(self, key: str, entry: CacheEntry) -> None:
+        """Update TTL for frequently accessed items.
+        
+        Args:
+            key: Cache key
+            entry: Cache entry
+        """
+        # Check if this is a hot item (frequently accessed)
+        if key in self._access_counts and len(self._access_counts[key]) >= self._hot_cache_threshold:
+            # Only extend TTL if it has an expiry
+            if entry.expiry is not None:
+                # Calculate remaining TTL
+                remaining_ttl = entry.expiry - time.time()
+                
+                if remaining_ttl > 0:
+                    # Extend TTL for hot items
+                    original_ttl = entry.expiry - entry.created_at
+                    extended_ttl = original_ttl * self._hot_cache_ttl_multiplier
+                    
+                    # Set new expiry time
+                    entry.expiry = time.time() + extended_ttl
+                    logger.debug(f"Extended TTL for hot cache item: {key} (access count: {len(self._access_counts[key])})")
+    
     def _evict_entries(self, required_space: int) -> None:
         """Evict entries from memory cache to make room.
         
@@ -275,21 +344,63 @@ class CacheManager:
         if not self._memory_cache:
             return
         
-        # Sort entries by last accessed time (oldest first)
-        entries = sorted(
-            self._memory_cache.values(),
+        # Identify hot cache items (frequently accessed)
+        hot_items = set()
+        for key, timestamps in self._access_counts.items():
+            if len(timestamps) >= self._hot_cache_threshold and key in self._memory_cache:
+                hot_items.add(key)
+        
+        # Calculate current hot cache size
+        hot_cache_size = sum(
+            self._memory_cache[key].size_bytes 
+            for key in hot_items
+        )
+        
+        # If hot cache is too large, evict least recently accessed hot items
+        if hot_cache_size > self._hot_cache_size:
+            hot_entries = sorted(
+                [self._memory_cache[key] for key in hot_items],
+                key=lambda e: (e.last_accessed, -e.access_count)
+            )
+            
+            # Evict hot items until we're under the hot cache size limit
+            for entry in hot_entries:
+                if hot_cache_size <= self._hot_cache_size:
+                    break
+                
+                hot_items.remove(entry.key)
+                hot_cache_size -= entry.size_bytes
+        
+        # Sort non-hot entries by last accessed time (oldest first)
+        cold_entries = sorted(
+            [e for e in self._memory_cache.values() if e.key not in hot_items],
             key=lambda e: (e.last_accessed, -e.access_count)
         )
         
-        # Evict entries until we have enough space
+        # Evict cold entries until we have enough space
         space_freed = 0
-        for entry in entries:
+        for entry in cold_entries:
             if self._current_memory_size - space_freed + required_space <= self._max_memory_size:
                 break
             
             space_freed += entry.size_bytes
             del self._memory_cache[entry.key]
             logger.debug(f"Evicted cache entry: {entry.key} ({entry.size_bytes} bytes)")
+        
+        # If we still need more space, start evicting hot items
+        if self._current_memory_size - space_freed + required_space > self._max_memory_size:
+            hot_entries = sorted(
+                [self._memory_cache[key] for key in hot_items],
+                key=lambda e: (e.last_accessed, -e.access_count)
+            )
+            
+            for entry in hot_entries:
+                space_freed += entry.size_bytes
+                del self._memory_cache[entry.key]
+                logger.debug(f"Evicted hot cache entry: {entry.key} ({entry.size_bytes} bytes)")
+                
+                if self._current_memory_size - space_freed + required_space <= self._max_memory_size:
+                    break
         
         self._current_memory_size -= space_freed
     
@@ -436,6 +547,10 @@ class CacheManager:
                 self._current_memory_size -= self._memory_cache[key].size_bytes
                 del self._memory_cache[key]
             
+            # Remove from access tracking
+            if key in self._access_counts:
+                del self._access_counts[key]
+            
             # Remove from disk cache
             self._remove_from_disk(key)
     
@@ -566,6 +681,9 @@ class CacheManager:
             self._memory_cache.clear()
             self._current_memory_size = 0
             
+            # Clear access tracking data
+            self._access_counts.clear()
+            
             # Clear disk cache
             if self._disk_cache_enabled and os.path.exists(self._cache_dir):
                 try:
@@ -594,6 +712,20 @@ class CacheManager:
             for entry in self._memory_cache.values():
                 type_counts[entry.data_type] = type_counts.get(entry.data_type, 0) + 1
             
+            # Calculate hot cache stats
+            hot_items = {}
+            hot_cache_size = 0
+            for key, timestamps in self._access_counts.items():
+                if len(timestamps) >= self._hot_cache_threshold and key in self._memory_cache:
+                    entry = self._memory_cache[key]
+                    hot_items[key] = {
+                        "access_count": len(timestamps),
+                        "size_bytes": entry.size_bytes,
+                        "data_type": entry.data_type,
+                        "last_accessed": entry.last_accessed
+                    }
+                    hot_cache_size += entry.size_bytes
+            
             # Calculate disk cache stats
             disk_count = 0
             disk_size = 0
@@ -612,6 +744,11 @@ class CacheManager:
                 "memory_entries": memory_count,
                 "memory_size_bytes": memory_size,
                 "memory_size_mb": memory_size / (1024 * 1024),
+                "hot_cache_entries": len(hot_items),
+                "hot_cache_size_bytes": hot_cache_size,
+                "hot_cache_size_mb": hot_cache_size / (1024 * 1024),
+                "hot_cache_threshold": self._hot_cache_threshold,
+                "hot_cache_ttl_multiplier": self._hot_cache_ttl_multiplier,
                 "disk_entries": disk_count,
                 "disk_size_bytes": disk_size,
                 "disk_size_mb": disk_size / (1024 * 1024),

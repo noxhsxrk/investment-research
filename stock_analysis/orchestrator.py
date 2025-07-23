@@ -75,13 +75,17 @@ class StockAnalysisOrchestrator:
     def __init__(self, 
                  max_workers: int = 4,
                  enable_parallel_processing: bool = True,
-                 continue_on_error: bool = True):
+                 continue_on_error: bool = True,
+                 include_technicals: bool = False,
+                 include_analyst: bool = False):
         """Initialize the analysis orchestrator.
         
         Args:
             max_workers: Maximum number of worker threads for parallel processing
             enable_parallel_processing: Whether to enable parallel processing
             continue_on_error: Whether to continue processing if one fails
+            include_technicals: Whether to include technical indicators in analysis
+            include_analyst: Whether to include analyst recommendations and price targets
         """
         logger.info("Initializing Stock Analysis Orchestrator")
         
@@ -89,6 +93,8 @@ class StockAnalysisOrchestrator:
         self.max_workers = max_workers
         self.enable_parallel_processing = enable_parallel_processing
         self.continue_on_error = continue_on_error
+        self.include_technicals = include_technicals
+        self.include_analyst = include_analyst
         
         # Initialize services
         self.stock_data_service = StockDataService()
@@ -97,13 +103,23 @@ class StockAnalysisOrchestrator:
         self.news_sentiment_analyzer = NewsSentimentAnalyzer()
         self.export_service = ExportService()
         
+        # Initialize enhanced services if needed
+        if include_technicals or include_analyst:
+            from stock_analysis.services.financial_data_integration_service import FinancialDataIntegrationService
+            from stock_analysis.services.enhanced_stock_data_service import EnhancedStockDataService
+            
+            self.integration_service = FinancialDataIntegrationService()
+            self.enhanced_stock_data_service = EnhancedStockDataService(self.integration_service)
+        
         # Progress tracking
         self.current_progress: Optional[AnalysisProgress] = None
         self.progress_callbacks: List[Callable[[AnalysisProgress], None]] = []
         
         logger.info(f"Orchestrator initialized with max_workers={max_workers}, "
                    f"parallel_processing={enable_parallel_processing}, "
-                   f"continue_on_error={continue_on_error}")
+                   f"continue_on_error={continue_on_error}, "
+                   f"include_technicals={include_technicals}, "
+                   f"include_analyst={include_analyst}")
     
     def add_progress_callback(self, callback: Callable[[AnalysisProgress], None]) -> None:
         """Add a callback function to receive progress updates.
@@ -145,9 +161,19 @@ class StockAnalysisOrchestrator:
         start_time = time.time()
         
         try:
-            # Step 1: Get basic security information
+            # Step 1: Get security information (basic or enhanced)
             logger.debug(f"Retrieving security info for {symbol}")
-            security_info = self.stock_data_service.get_security_info(symbol)
+            
+            if hasattr(self, 'enhanced_stock_data_service') and (self.include_technicals or self.include_analyst):
+                # Use enhanced stock data service
+                security_info = self.enhanced_stock_data_service.get_enhanced_security_info(
+                    symbol,
+                    include_technicals=self.include_technicals,
+                    include_analyst_data=self.include_analyst
+                )
+            else:
+                # Use standard stock data service
+                security_info = self.stock_data_service.get_security_info(symbol)
             
             # Different analysis paths for stocks vs ETFs
             if isinstance(security_info, ETFInfo):
@@ -687,7 +713,7 @@ class StockAnalysisOrchestrator:
             elif export_format.lower() == "excel":
                 return self.export_service.export_to_excel(results, filename)
             elif export_format.lower() == "json":
-                return self.export_service.export_to_powerbi_json(results, filename)
+                return self.export_service.export_to_json(results, filename)
             else:
                 raise ExportError(f"Unsupported export format: {export_format}")
                 

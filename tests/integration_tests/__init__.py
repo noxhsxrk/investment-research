@@ -1,0 +1,1 @@
+"""Integration tests package for stock analysis application."""

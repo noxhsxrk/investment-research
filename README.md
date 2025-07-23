@@ -1,16 +1,21 @@
 # Stock Analysis Dashboard
 
-A comprehensive Python-based stock analysis system that retrieves financial data using the yfinance library and integrates with Power BI for visualization. The system analyzes multiple aspects of stocks including news sentiment, financial metrics, company health indicators, and fair value calculations.
+A comprehensive Python-based stock analysis system that retrieves financial data from multiple sources including yfinance, Investing.com, and Alpha Vantage. The system integrates with Power BI for visualization and analyzes multiple aspects of stocks including news sentiment, financial metrics, company health indicators, and fair value calculations.
 
 ## Features
 
-- **Stock Data Retrieval**: Uses yfinance to get current and historical stock data
+- **Multi-Source Data Integration**: Retrieves data from yfinance, Investing.com, and Alpha Vantage with fallback logic
+- **Enhanced Stock Data**: Comprehensive security information including technical indicators and analyst recommendations
+- **Detailed Financial Statements**: Income statements, balance sheets, and cash flow statements with growth metrics
+- **Market Data**: Major indices, sector performance, commodities, forex, and economic indicators
+- **Financial News**: Company news, market news, and economic calendar with sentiment analysis
 - **Financial Analysis**: Calculates key financial ratios and health scores
 - **Valuation Models**: Implements DCF, peer comparison, and PEG ratio models
 - **Sentiment Analysis**: Analyzes news sentiment for market perception insights
 - **Power BI Integration**: Exports data in Power BI compatible formats
 - **Automated Scheduling**: Supports scheduled analysis runs
 - **Comprehensive Logging**: Detailed logging and error handling
+- **Performance Optimization**: Caching, parallel processing, and source prioritization
 
 ## Installation
 
@@ -50,11 +55,23 @@ The system uses a YAML configuration file (`config.yaml`) for settings. You can 
 # Analyze a single stock
 stock-analysis analyze AAPL
 
+# Analyze with technical indicators and analyst data
+stock-analysis analyze AAPL --include-technicals --include-analyst
+
 # Analyze multiple stocks
 stock-analysis analyze AAPL MSFT GOOGL
 
+# Get detailed financial statements
+stock-analysis financials AAPL --statement income --period quarterly --growth
+
+# Get market data
+stock-analysis market --indices --sectors --commodities
+
+# Get financial news
+stock-analysis news --symbol AAPL --sentiment
+
 # Run scheduled analysis
-stock-analysis schedule --interval daily
+stock-analysis schedule add daily-tech "AAPL,MSFT,GOOGL" --interval daily
 
 # Export results to Power BI format
 stock-analysis export --format powerbi
@@ -64,15 +81,31 @@ stock-analysis export --format powerbi
 
 ```python
 from stock_analysis import StockAnalysisOrchestrator
+from stock_analysis.services.financial_data_integration_service import FinancialDataIntegrationService
+from stock_analysis.services.market_data_service import MarketDataService
+from stock_analysis.services.news_service import NewsService
 
-# Initialize analyzer
-analyzer = StockAnalysisOrchestrator()
+# Initialize orchestrator
+orchestrator = StockAnalysisOrchestrator(include_technicals=True, include_analyst=True)
 
 # Analyze a stock
-result = analyzer.analyze_stock('AAPL')
+result = orchestrator.analyze_single_security('AAPL')
 
 # Export results
-analyzer.export_results(result, format='excel')
+orchestrator.export_results(result, format='excel')
+
+# Use integration service for advanced data retrieval
+integration_service = FinancialDataIntegrationService()
+security_info = integration_service.get_enhanced_security_info('AAPL')
+financial_statements = integration_service.get_financial_statements('AAPL', 'income', 'annual')
+
+# Get market data
+market_service = MarketDataService()
+market_overview = market_service.get_market_overview()
+
+# Get financial news
+news_service = NewsService()
+company_news = news_service.get_company_news('AAPL')
 ```
 
 ## Project Structure
