@@ -92,6 +92,12 @@ Examples:
   
   # Show configuration
   stock-analysis config show
+  
+  # Comprehensive analysis of a stock
+  stock-analysis comprehensive AAPL --sentiment --export-format excel
+  
+  # Comprehensive analysis of multiple stocks
+  stock-analysis comprehensive AAPL MSFT GOOG --parallel --max-workers 6
         """
     )
     
@@ -179,6 +185,69 @@ Examples:
                            help='Output filename (without extension)')
     news_parser.add_argument('--no-export', action='store_true',
                            help='Skip exporting results')
+                           
+    # Comprehensive command
+    comprehensive_parser = subparsers.add_parser('comprehensive', 
+        help='Comprehensive stock analysis including analysis, financials, and news',
+        description='''
+        Perform a comprehensive analysis of one or more stocks, retrieving stock analysis data,
+        financial statements, and financial news in a single operation. This command combines
+        the functionality of the analyze, financials, and news commands into a unified workflow
+        with parallel processing for improved performance.
+        
+        Examples:
+          stock-analysis comprehensive AAPL
+          stock-analysis comprehensive AAPL MSFT GOOGL --parallel --max-workers 6
+          stock-analysis comprehensive AAPL --statement income --period quarterly --sentiment
+        ''',
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    comprehensive_parser.add_argument('symbols', nargs='+', help='Stock symbols to analyze')
+    
+    # Data category options
+    data_category_group = comprehensive_parser.add_argument_group('Data Category Options')
+    data_category_group.add_argument('--skip-analysis', action='store_true', 
+                                    help='Skip stock analysis data retrieval')
+    data_category_group.add_argument('--skip-financials', action='store_true', 
+                                    help='Skip financial statements retrieval')
+    data_category_group.add_argument('--skip-news', action='store_true', 
+                                    help='Skip financial news retrieval')
+    
+    # Financial statement options
+    financial_group = comprehensive_parser.add_argument_group('Financial Statement Options')
+    financial_group.add_argument('--statement', choices=['income', 'balance', 'cash', 'all'], 
+                               default='all', 
+                               help='Financial statement type to retrieve (default: all)')
+    financial_group.add_argument('--period', choices=['annual', 'quarterly'], 
+                               default='annual', 
+                               help='Reporting period for financial statements (default: annual)')
+    financial_group.add_argument('--years', type=int, default=5, 
+                               help='Number of years of historical financial data (default: 5)')
+    
+    # News options
+    news_group = comprehensive_parser.add_argument_group('News Options')
+    news_group.add_argument('--news-limit', type=int, default=10, 
+                          help='Maximum number of news items to retrieve (default: 10)')
+    news_group.add_argument('--news-days', type=int, default=7, 
+                          help='Number of days to look back for news (default: 7)')
+    news_group.add_argument('--sentiment', action='store_true', 
+                          help='Include sentiment analysis for news')
+    
+    # Export options
+    export_group = comprehensive_parser.add_argument_group('Export Options')
+    export_group.add_argument('--export-format', '-f', choices=['csv', 'excel', 'json'], 
+                            default='excel', 
+                            help='Export format for results (default: excel)')
+    export_group.add_argument('--output', '-o', type=str, 
+                            help='Output filename without extension (default: auto-generated)')
+    export_group.add_argument('--no-export', action='store_true', 
+                            help='Skip exporting results')
+    
+    # Processing options
+    processing_group = comprehensive_parser.add_argument_group('Processing Options')
+    processing_group.add_argument('--parallel', action='store_true', default=True, 
+                                help='Enable parallel processing for improved performance (default: enabled)')
+    processing_group.add_argument('--max-workers', type=int, default=4, 
+                                help='Maximum number of worker threads for parallel processing (default: 4)')
     
     # Financials command
     financials_parser = subparsers.add_parser('financials', help='Get detailed financial data')
@@ -458,12 +527,39 @@ def handle_analyze_command(args) -> int:
             print(f"\nHealth Score: {result.health_score.overall_score:.1f}/100")
             print(f"Recommendation: {result.fair_value.recommendation}")
             print(f"Fair Value: ${result.fair_value.average_fair_value:.2f}")
-            print(f"Sentiment: {result.sentiment.overall_sentiment:.2f}")
             
-            if args.verbose:
-                print("\nRecommendations:")
-                for i, rec in enumerate(result.recommendations, 1):
-                    print(f"  {i}. {rec}")
+            # Calculate price difference and percentage
+            price_diff = result.fair_value.average_fair_value - result.fair_value.current_price
+            price_pct = (price_diff / result.fair_value.current_price) * 100
+            
+            if price_diff > 0:
+                print(f"Undervalued by: ${abs(price_diff):.2f} ({abs(price_pct):.1f}%)")
+            elif price_diff < 0:
+                print(f"Overvalued by: ${abs(price_diff):.2f} ({abs(price_pct):.1f}%)")
+            else:
+                print("Fairly valued")
+                
+            # Convert sentiment score to descriptive text
+            sentiment_score = result.sentiment.overall_sentiment
+            sentiment_text = "Neutral"
+            if sentiment_score >= 0.5:
+                sentiment_text = "Very Positive"
+            elif sentiment_score >= 0.2:
+                sentiment_text = "Positive"
+            elif sentiment_score <= -0.5:
+                sentiment_text = "Very Negative"
+            elif sentiment_score <= -0.2:
+                sentiment_text = "Negative"
+            
+            print(f"Sentiment: {sentiment_text} ({sentiment_score:.2f})")
+            
+            # Always show recommendations
+            print("\nRecommendations:")
+            for i, rec in enumerate(result.recommendations, 1):
+                print(f"  {i}. {rec}")
+                
+            # Add a separator line for better readability
+            print("\n" + "=" * 50)
         else:
             # Multiple securities analysis
             report = orchestrator.analyze_multiple_securities(args.symbols)
@@ -1238,6 +1334,8 @@ def main() -> int:
         return handle_news_command(args)
     elif args.command == 'financials':
         return handle_financials_command(args)
+    elif args.command == 'comprehensive':
+        return handle_comprehensive_command(args)
     else:
         parser.print_help()
         return 0
@@ -1245,6 +1343,110 @@ def main() -> int:
 
 if __name__ == '__main__':
     sys.exit(main())
+
+
+def handle_comprehensive_command(args) -> int:
+    """Handle the comprehensive command.
+    
+    Args:
+        args: Parsed command line arguments
+        
+    Returns:
+        int: Exit code (0 for success, 1 for error)
+    """
+    try:
+        print(f"Performing comprehensive analysis for {len(args.symbols)} security(s): {', '.join(args.symbols)}")
+        
+        # Create orchestrator
+        from stock_analysis.comprehensive_orchestrator import ComprehensiveAnalysisOrchestrator
+        from stock_analysis.utils.display_utils import display_comprehensive_summary, display_comparative_analysis
+        
+        orchestrator = ComprehensiveAnalysisOrchestrator(
+            enable_parallel_processing=args.parallel,
+            max_workers=args.max_workers,
+            continue_on_error=True
+        )
+        
+        # Set up options
+        options = {
+            'skip_analysis': args.skip_analysis,
+            'skip_financials': args.skip_financials,
+            'skip_news': args.skip_news,
+            'statement': args.statement,
+            'period': args.period,
+            'years': args.years,
+            'news_limit': args.news_limit,
+            'news_days': args.news_days,
+            'sentiment': args.sentiment
+        }
+        
+        # Perform comprehensive analysis with enhanced parallel processing
+        if args.parallel and len(args.symbols) > 1:
+            # Import the enhanced parallel processing implementation
+            from stock_analysis.comprehensive_orchestrator_parallel import analyze_comprehensive_parallel
+            
+            # Bind the method to the orchestrator instance
+            orchestrator.analyze_comprehensive_parallel = analyze_comprehensive_parallel.__get__(orchestrator)
+            
+            # Use the enhanced parallel processing implementation
+            print(f"Using enhanced parallel processing with {args.max_workers} workers")
+            report = orchestrator.analyze_comprehensive_parallel(args.symbols, options)
+        else:
+            # Use the standard implementation for single symbol or when parallel is disabled
+            report = orchestrator.analyze_comprehensive(args.symbols, options)
+        
+        # Display comprehensive summary
+        display_comprehensive_summary(report, args.verbose)
+        
+        # Display comparative analysis if multiple securities were analyzed successfully
+        if len(report.results) > 1:
+                display_comparative_analysis(report)
+                print(f"{'-' * 40}")
+                
+                # Analysis summary
+                if result.analysis_result:
+                    print(f"Current Price: ${result.analysis_result.fair_value.current_price:.2f}")
+                    print(f"Fair Value: ${result.analysis_result.fair_value.average_fair_value:.2f}")
+                    print(f"Recommendation: {result.analysis_result.fair_value.recommendation}")
+                    print(f"Health Score: {result.analysis_result.health_score.overall_score:.1f}/100")
+                    print(f"Risk Assessment: {result.analysis_result.health_score.risk_assessment}")
+                
+                # Financial statements summary
+                if result.financial_statements:
+                    print("\nFinancial Statements:")
+                    for statement_type, statement in result.financial_statements.items():
+                        if statement:
+                            print(f"  - {statement_type.replace('_', ' ').title()}: Available")
+                        else:
+                            print(f"  - {statement_type.replace('_', ' ').title()}: Not available")
+                
+                # News summary
+                if result.news_items:
+                    print(f"\nNews: {len(result.news_items)} articles retrieved")
+                    if result.news_sentiment:
+                        print(f"News Sentiment: {result.news_sentiment.overall_sentiment:.2f} "
+                              f"({result.news_sentiment.sentiment_label})")
+                    
+                    # Show top 3 news headlines
+                    if len(result.news_items) > 0:
+                        print("\nLatest Headlines:")
+                        for i, news in enumerate(result.news_items[:3], 1):
+                            print(f"  {i}. {news.title}")
+        
+        # Export results if requested
+        if not args.no_export and report.results:
+            filename = args.output
+            export_path = orchestrator.export_results(report, args.export_format, filename)
+            print(f"\nResults exported to: {export_path}")
+        
+        return 0
+        
+    except Exception as e:
+        print(f"Error: {str(e)}", file=sys.stderr)
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        return 1
 
 
 def handle_news_command(args) -> int:

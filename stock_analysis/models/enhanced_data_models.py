@@ -493,6 +493,23 @@ class NewsItem:
     impact: Optional[str] = None  # high, medium, low
     categories: Optional[List[str]] = None
     
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary representation.
+        
+        Returns:
+            Dictionary representation of the news item
+        """
+        return {
+            'title': self.title,
+            'source': self.source,
+            'url': self.url,
+            'published_at': self.published_at,
+            'summary': self.summary,
+            'sentiment': self.sentiment,
+            'impact': self.impact,
+            'categories': self.categories
+        }
+    
     def validate(self) -> None:
         """Validate the news item data.
         

@@ -22,6 +22,36 @@ stock-analysis analyze AAPL --include-analyst
 stock-analysis analyze AAPL --include-technicals --include-analyst
 ```
 
+## Comprehensive Analysis
+
+```bash
+# Comprehensive analysis of a single stock with default settings
+stock-analysis comprehensive AAPL
+
+# Comprehensive analysis with sentiment analysis for news
+stock-analysis comprehensive AAPL --sentiment
+
+# Comprehensive analysis with custom export format
+stock-analysis comprehensive AAPL --export-format json --output apple_comprehensive
+
+# Comprehensive analysis focusing only on specific data categories
+stock-analysis comprehensive AAPL --skip-financials
+stock-analysis comprehensive AAPL --skip-news
+stock-analysis comprehensive AAPL --skip-analysis
+
+# Comprehensive analysis with specific financial statement options
+stock-analysis comprehensive AAPL --statement income --period quarterly --years 3
+
+# Comprehensive analysis with custom news options
+stock-analysis comprehensive AAPL --news-limit 20 --news-days 14
+
+# Comprehensive analysis with technical indicators and analyst data
+stock-analysis comprehensive AAPL --include-technicals --include-analyst
+
+# Comprehensive analysis of multiple stocks with parallel processing
+stock-analysis comprehensive AAPL MSFT GOOGL --parallel --max-workers 6
+```
+
 ## Multiple Stock Analysis
 
 ```bash
@@ -196,6 +226,7 @@ stock-analysis --verbose batch example_stocks.txt
 ### Stock Symbol Files
 
 Text file (one symbol per line):
+
 ```
 AAPL
 MSFT
@@ -205,6 +236,7 @@ AMZN
 ```
 
 CSV file (comma-separated):
+
 ```
 AAPL,MSFT,GOOGL
 JPM,BAC,WFC
@@ -225,3 +257,115 @@ The CLI includes comprehensive error handling:
 - Network timeouts are retried automatically
 - Configuration validation prevents invalid settings
 - Verbose mode shows detailed error information
+
+## Comprehensive Analysis Workflow
+
+The comprehensive command provides a unified workflow for analyzing stocks:
+
+### Basic Usage
+
+```bash
+# Single stock comprehensive analysis
+stock-analysis comprehensive AAPL
+
+# Multiple stocks comprehensive analysis
+stock-analysis comprehensive AAPL MSFT GOOGL
+```
+
+### Customizing Data Categories
+
+```bash
+# Skip specific data categories
+stock-analysis comprehensive AAPL --skip-financials
+stock-analysis comprehensive AAPL --skip-news
+stock-analysis comprehensive AAPL --skip-analysis
+
+# Focus only on financial statements and news (skip analysis)
+stock-analysis comprehensive AAPL --skip-analysis
+```
+
+### Analysis Options
+
+```bash
+# Include technical indicators (RSI, MACD, moving averages)
+stock-analysis comprehensive AAPL --include-technicals
+
+# Include analyst recommendations and price targets
+stock-analysis comprehensive AAPL --include-analyst
+
+# Include both technical indicators and analyst data
+stock-analysis comprehensive AAPL --include-technicals --include-analyst
+```
+
+### Financial Statement Options
+
+```bash
+# Get only income statements
+stock-analysis comprehensive AAPL --statement income
+
+# Get quarterly financial statements
+stock-analysis comprehensive AAPL --period quarterly
+
+# Get 3 years of historical data
+stock-analysis comprehensive AAPL --years 3
+
+# Combine financial statement options
+stock-analysis comprehensive AAPL --statement income --period quarterly --years 2
+```
+
+### News Options
+
+```bash
+# Get more news items
+stock-analysis comprehensive AAPL --news-limit 20
+
+# Look back further for news
+stock-analysis comprehensive AAPL --news-days 14
+
+# Include sentiment analysis
+stock-analysis comprehensive AAPL --sentiment
+
+# Combine news options
+stock-analysis comprehensive AAPL --news-limit 15 --news-days 10 --sentiment
+```
+
+### Export Options
+
+```bash
+# Export to different formats
+stock-analysis comprehensive AAPL --export-format json
+stock-analysis comprehensive AAPL --export-format csv
+stock-analysis comprehensive AAPL --export-format excel
+
+# Specify output filename
+stock-analysis comprehensive AAPL --output apple_analysis
+
+# Skip exporting results
+stock-analysis comprehensive AAPL --no-export
+```
+
+### Performance Optimization
+
+```bash
+# Enable parallel processing (default)
+stock-analysis comprehensive AAPL MSFT GOOGL --parallel
+
+# Increase worker threads for better performance
+stock-analysis comprehensive AAPL MSFT GOOGL --max-workers 8
+
+# Disable parallel processing
+stock-analysis comprehensive AAPL MSFT GOOGL --no-parallel
+```
+
+### Combined Examples
+
+```bash
+# Full analysis with all options
+stock-analysis comprehensive AAPL MSFT --include-technicals --include-analyst --statement all --period quarterly --years 3 --news-limit 15 --news-days 10 --sentiment --export-format excel --output tech_stocks --parallel --max-workers 6
+
+# Focused financial analysis
+stock-analysis comprehensive AAPL MSFT GOOGL --skip-news --statement income --period quarterly --years 5 --export-format excel --output tech_financials
+
+# News-only analysis
+stock-analysis comprehensive AAPL MSFT GOOGL --skip-analysis --skip-financials --news-limit 20 --news-days 14 --sentiment --export-format json --output tech_news
+```
